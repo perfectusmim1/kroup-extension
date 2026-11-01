@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Smart Toolkit</title>
+  <link rel="stylesheet" href="popup.css?v=1.4">
+</head>
+<body>
+  <div class="app-container">
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-container">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L14.85 9.15L22 12L14.85 14.85L12 22L9.15 14.85L2 12L9.15 9.15L12 2Z" fill="url(#logo-grad)" stroke="none"/>
+            <defs>
+              <linearGradient id="logo-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#06b6d4" />
+                <stop offset="50%" stop-color="#3b82f6" />
+                <stop offset="100%" stop-color="#6366f1" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <span class="logo-text">Gemini Toolkit</span>
+        </div>
+        <button class="sidebar-toggle" id="sidebar-toggle" title="Menüyü Daralt/Genişlet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="11 17 6 12 11 7"></polyline>
+            <polyline points="18 17 13 12 18 7"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="corrector">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+          <span class="nav-label">Yazım Düzeltici</span>
+        </button>
+
+        <button class="nav-item" data-tab="summarizer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <line x1="21" y1="10" x2="3" y2="10"></line>
+            <line x1="21" y1="6" x2="3" y2="6"></line>
+            <line x1="21" y1="14" x2="3" y2="14"></line>
+            <line x1="21" y1="18" x2="3" y2="18"></line>
+          </svg>
+          <span class="nav-label">Özetleyici</span>
+        </button>
+
+        <button class="nav-item" data-tab="reply">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span class="nav-label">Akıllı Yanıt</span>
+        </button>
+
+        <button class="nav-item" data-tab="translator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          <span class="nav-label">Dil Çevirmeni</span>
+        </button>
+
+        <button class="nav-item" data-tab="youtube">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-1.92 29 29 0 0 0 .46-5.33 29 29 0 0 0-.46-5.33z"></path>
+            <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon>
+          </svg>
+          <span class="nav-label">YouTube</span>
+        </button>
+
+        <button class="nav-item" data-tab="authenticator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span class="nav-label">Doğrulayıcı</span>
+        </button>
+
+        <button class="nav-item" data-tab="music">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+          <span class="nav-label">Müzik Bul</span>
+        </button>
+
+        <button class="nav-item" data-tab="sound">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          <span class="nav-label">Ses</span>
+        </button>
+
+        <button class="nav-item" data-tab="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span class="nav-label">Ayarlar</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="version-label">v1.4</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="content-header">
+        <div class="header-text">
+          <h1 id="active-tab-title">Yazım Düzeltici</h1>
+        </div>
+      </header>
+
+      <div class="panels-container">
+
+        <section class="panel active" id="panel-corrector">
+          <div class="input-group">
+            <textarea id="corrector-input" class="textarea-input" placeholder="Düzeltilmesini istediğiniz Türkçe cümleyi buraya yazın..." maxlength="8000"></textarea>
+            <div class="char-counter"><span id="corrector-counter">0</span>/8000</div>
+          </div>
+
+          <div class="actions-row">
+            <button class="btn btn-secondary btn-clear" id="corrector-clear">Temizle</button>
+            <button class="btn btn-primary" id="corrector-btn">
+              <span>Cümleyi Düzelt</span>
+              <div class="loader-spinner" hidden></div>
+            </button>
+          </div>
+
+          <div class="result-card" id="corrector-result-card" hidden>
+            <div class="result-header">
+              <span class="result-title">Düzeltilmiş Sonuç</span>
+              <button class="btn-copy" id="corrector-copy" title="Kopyala">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="copy-icon">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-text">Kopyala</span>
+              </button>
+            </div>
+            <div class="result-body markdown-content" id="corrector-output"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-summarizer">
+          <div class="input-group">
+            <textarea id="summarizer-input" class="textarea-input" placeholder="Özetlenmesini istediğiniz uzun metni buraya yapıştırın..." maxlength="20000"></textarea>
+            <div class="char-counter"><span id="summarizer-counter">0</span>/20000</div>
+          </div>
+
+          <div class="controls-grid">
+            <div class="control-item">
+              <label>Uzunluk</label>
+              <div class="custom-select" data-id="summarizer-length">
+                <button type="button" class="custom-select-trigger">
+                  <span>Orta (2-3 Paragraf)</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="custom-select-options">
+                  <div class="custom-option" data-value="short">Kısa (Tek Paragraf)</div>
+                  <div class="custom-option active" data-value="medium">Orta (2-3 Paragraf)</div>
+                  <div class="custom-option" data-value="long">Detaylı (Kapsamlı Analiz)</div>
+                </div>
+                <input type="hidden" id="summarizer-length" value="medium">
+              </div>
+            </div>
+            <div class="control-item">
+              <label>Format</label>
+              <div class="custom-select" data-id="summarizer-format">
+                <button type="button" class="custom-select-trigger">
+                  <span>Madde İşaretleri</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="custom-select-options">
+                  <div class="custom-option active" data-value="bullet">Madde İşaretleri</div>
+                  <div class="custom-option" data-value="paragraph">Düz Metin</div>
+                </div>
+                <input type="hidden" id="summarizer-format" value="bullet">
+              </div>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button class="btn btn-secondary btn-clear" id="summarizer-clear">Temizle</button>
+            <button class="btn btn-primary" id="summarizer-btn">
+              <span>Özetle</span>
+              <div class="loader-spinner" hidden></div>
+            </button>
+          </div>
+
+          <div class="result-card" id="summarizer-result-card" hidden>
+            <div class="result-header">
+              <span class="result-title">Özet Sonuç</span>
+              <button class="btn-copy" id="summarizer-copy" title="Kopyala">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="copy-icon">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-text">Kopyala</span>
+              </button>
+            </div>
+            <div class="result-body markdown-content" id="summarizer-output"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-reply">
+          <div class="input-group">
+            <textarea id="reply-input" class="textarea-input" placeholder="Gelen mesajı veya yanıt yazılacak konunun ana hatlarını girin..." maxlength="12000"></textarea>
+            <div class="char-counter"><span id="reply-counter">0</span>/12000</div>
+          </div>
+
+          <div class="input-group">
+            <textarea id="reply-stance-input" class="textarea-input" style="height:72px;" placeholder="Görüşün (opsiyonel): ne hakkında, hangi tarafı haklı buluyorsun, neyi savunmak istiyorsun..." maxlength="2000"></textarea>
+            <div class="char-counter"><span id="reply-stance-counter">0</span>/2000</div>
+          </div>
+
+          <div class="controls-grid">
+            <div class="control-item">
+              <label>Tonlama</label>
+              <div class="custom-select" data-id="reply-tone">
+                <button type="button" class="custom-select-trigger">
+                  <span>Resmi / Profesyonel</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="custom-select-options">
+                  <div class="custom-option active" data-value="professional">Resmi / Profesyonel</div>
+                  <div class="custom-option" data-value="casual">Samimi / Arkadaşça</div>
+                  <div class="custom-option" data-value="persuasive">İkna Edici</div>
+                  <div class="custom-option" data-value="polite-short">Kibar ve Kısa</div>
+                </div>
+                <input type="hidden" id="reply-tone" value="professional">
+              </div>
+            </div>
+            <div class="control-item">
+              <label>Yazım Dili</label>
+              <div class="custom-select" data-id="reply-lang">
+                <button type="button" class="custom-select-trigger">
+                  <span>Türkçe</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                <div class="custom-select-options"></div>
+                <input type="hidden" id="reply-lang" value="tr">
+              </div>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button class="btn btn-secondary btn-clear" id="reply-clear">Temizle</button>
+            <button class="btn btn-primary" id="reply-btn">
+              <span>Yanıt Taslağı Oluştur</span>
+              <div class="loader-spinner" hidden></div>
+            </button>
+          </div>
+
+          <div class="result-card" id="reply-result-card" hidden>
+            <div class="result-header">
+              <span class="result-title">Oluşturulan Yanıt</span>
+              <button class="btn-copy" id="reply-copy" title="Kopyala">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="copy-icon">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-text">Kopyala</span>
+              </button>
+            </div>
+            <div class="result-body markdown-content" id="reply-output"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-translator">
+          <div class="translation-header-row">
+            <div class="custom-select select-lang" data-id="trans-source">
+              <button type="button" class="custom-select-trigger">
+                <span>Dili Algıla (Otomatik)</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
+              <div class="custom-select-options"></div>
+              <input type="hidden" id="trans-source" value="auto">
+            </div>
+
+            <button type="button" class="btn-swap-lang" id="trans-swap" title="Dilleri Değiştir">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"></polyline>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                <polyline points="7 23 3 19 7 15"></polyline>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+              </svg>
+            </button>
+
+            <div class="custom-select select-lang" data-id="trans-target">
+              <button type="button" class="custom-select-trigger">
+                <span>Türkçe</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
+              <div class="custom-select-options"></div>
+              <input type="hidden" id="trans-target" value="tr">
+            </div>
+          </div>
+
+          <div class="input-group">
+            <textarea id="translator-input" class="textarea-input" placeholder="Çevrilmesini istediğiniz metni buraya yazın..." maxlength="16000"></textarea>
+          </div>
+
+          <div class="actions-row">
+            <span class="char-counter-inline"><span id="translator-counter">0</span>/16000</span>
+            <button class="btn btn-secondary btn-clear" id="translator-clear">Temizle</button>
+            <button class="btn btn-primary" id="translator-btn">
+              <span>Çevir</span>
+              <div class="loader-spinner" hidden></div>
+            </button>
+          </div>
+
+          <div class="result-card" id="translator-result-card" hidden>
+            <div class="result-header">
+              <span class="result-title">Çeviri Sonucu</span>
+              <button class="btn-copy" id="translator-copy" title="Kopyala">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="copy-icon">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-text">Kopyala</span>
+              </button>
+            </div>
+            <div class="result-body markdown-content" id="translator-output"></div>
+            <div class="explanation-box" id="translator-explanation-box" hidden>
+              <div class="explanation-title">Kültürel & Deyimsel Notlar</div>
+              <div class="explanation-body" id="translator-explanation"></div>
+            </div>
+          </div>
+
+          <div class="settings-section" id="page-in-translator" style="margin-top:14px;margin-bottom:0;">
+            <div class="settings-section-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <span>Sayfa Çevirisi</span>
+            </div>
+            <div class="controls-grid">
+              <div class="control-item">
+                <label>Hedef Dil</label>
+                <div class="custom-select" data-id="page-trans-target">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Türkçe</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options"></div>
+                  <input type="hidden" id="page-trans-target" value="tr">
+                </div>
+              </div>
+            </div>
+
+            <div class="actions-row">
+              <button class="btn btn-secondary" id="page-restore-btn" disabled>Orijinal Hali</button>
+              <button class="btn btn-primary" id="page-translate-btn">
+                <span>Sayfayı Çevir</span>
+                <div class="loader-spinner" hidden></div>
+              </button>
+            </div>
+
+            <div class="progress-section" id="page-progress-section" hidden>
+              <div class="progress-header">
+                <span>Çevriliyor...</span>
+                <span id="page-progress-percent">0%</span>
+              </div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="page-progress-fill"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-youtube">
+          <div class="settings-form">
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-1.92 29 29 0 0 0 .46-5.33 29 29 0 0 0-.46-5.33z"></path>
+                  <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon>
+                </svg>
+                <span>YouTube Altyazı Çevirisi</span>
+                <span class="badge" id="yt-status-badge" style="margin-left:auto;">Hazır</span>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Eklenti Açık</div>
+                    <div class="toggle-desc">YouTube altyazı çevirisini aç/kapat.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-enabled" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Hedef Dil</label>
+                <div class="custom-select" data-id="yt-target-lang">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Türkçe</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options"></div>
+                  <input type="hidden" id="yt-target-lang" value="tr">
+                </div>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Tercih Edilen Kaynak Dil</label>
+                <div class="custom-select" data-id="yt-preferred-source">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Otomatik (En Üstteki)</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options"></div>
+                  <input type="hidden" id="yt-preferred-source" value="auto">
+                </div>
+                <p class="input-helper">Videodaki altyazı kanallarından hangisinin öncelikli alınacağı.</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <span>Gemini Ayarları (YouTube)</span>
+              </div>
+
+              <div class="settings-group">
+                <p class="input-helper">API anahtarı olarak genel <b>Ayarlar</b> sekmesinde girili anahtar kullanılır. Aşağıdan sadece model ve düşünme seviyesini seçebilirsin.</p>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Gemini Modeli</label>
+                <div class="custom-select" data-id="yt-gemini-model">
+                  <button type="button" class="custom-select-trigger">
+                    <span>gemini-3.8-flash</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option active" data-value="gemini-3.8-flash">gemini-3.8-flash</div>
+                    <div class="custom-option" data-value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</div>
+                  </div>
+                  <input type="hidden" id="yt-gemini-model" value="gemini-3.8-flash">
+                </div>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Düşünme Seviyesi</label>
+                <div class="custom-select" data-id="yt-thinking-level">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Orta (Balanced)</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option" data-value="MINIMAL">Minimal (En Hızlı)</div>
+                    <div class="custom-option" data-value="LOW">Düşük</div>
+                    <div class="custom-option active" data-value="MEDIUM">Orta (Balanced)</div>
+                    <div class="custom-option" data-value="HIGH">Yüksek (En Derin)</div>
+                  </div>
+                  <input type="hidden" id="yt-thinking-level" value="MEDIUM">
+                </div>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Çeviri Parçası</label>
+                <div class="custom-select" data-id="yt-trans-parts">
+                  <button type="button" class="custom-select-trigger">
+                    <span>3 Parça</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option" data-value="1">1 Parça</div>
+                    <div class="custom-option" data-value="2">2 Parça</div>
+                    <div class="custom-option active" data-value="3">3 Parça</div>
+                    <div class="custom-option" data-value="4">4 Parça</div>
+                    <div class="custom-option" data-value="5">5 Parça</div>
+                    <div class="custom-option" data-value="6">6 Parça</div>
+                  </div>
+                  <input type="hidden" id="yt-trans-parts" value="3">
+                </div>
+              </div>
+
+              <div class="toggle-list" style="margin-top: 14px;">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Açıklamaları Filtrele (Ses/Aksiyon)</div>
+                    <div class="toggle-desc">[Müzik], (Alkış) gibi ses/aksiyon açıklamalarını çevirme.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-filter-extra" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="toggle-divider"></div>
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Otomatik Çevir</div>
+                    <div class="toggle-desc">Video açılınca altyazıyı otomatik çevir.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-auto-translate" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Altyazı Stili (Netflix)</span>
+              </div>
+
+              <div class="yt-preview-container" id="yt-preview-container">
+                <div class="yt-preview-label">Önizleme</div>
+                <div class="yt-preview-video-bg">
+                  <div id="yt-preview-subtitle" class="yt-preview-subtitle yt-style-shadow">Hello, how are you?</div>
+                </div>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Netflix Klasik (Gölge)</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-style-shadow" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="toggle-divider"></div>
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Kutu Arka Planı</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-style-box">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div class="toggle-divider"></div>
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Kontur (Outline)</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-style-outline">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="control-item" style="margin-top: 12px;">
+                <label>Yazı Boyutu (<span id="yt-font-size-val">24px</span>)</label>
+                <input type="range" id="yt-font-size" class="yt-range" min="16" max="36" value="24">
+              </div>
+
+              <div class="control-item" id="yt-opacity-row" style="margin-top: 10px;">
+                <label>Arka Plan Opaklığı (<span id="yt-bg-opacity-val">75%</span>)</label>
+                <input type="range" id="yt-bg-opacity" class="yt-range" min="0" max="100" value="75">
+              </div>
+
+              <div class="control-item" style="margin-top: 10px;">
+                <label>Yazı Kalınlığı</label>
+                <div class="custom-select" data-id="yt-font-weight">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Kalın</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option" data-value="600">Normal</div>
+                    <div class="custom-option active" data-value="700">Kalın</div>
+                    <div class="custom-option" data-value="800">Ekstra Kalın</div>
+                  </div>
+                  <input type="hidden" id="yt-font-weight" value="700">
+                </div>
+              </div>
+
+              <div class="control-item" id="yt-bgcolor-row" style="margin-top: 10px;">
+                <label>Kutu Arka Plan Rengi</label>
+                <div class="yt-color-presets" id="yt-bgcolor-presets">
+                  <button class="yt-color-btn active" data-color="#000000" style="background:#000000" title="Siyah"></button>
+                  <button class="yt-color-btn" data-color="#1e1e24" style="background:#1e1e24" title="Koyu Gri"></button>
+                  <button class="yt-color-btn" data-color="#101525" style="background:#101525" title="Gece Mavisi"></button>
+                  <button class="yt-color-btn" data-color="#8b0000" style="background:#8b0000" title="Koyu Kırmızı"></button>
+                  <button class="yt-color-btn" data-color="#333333" style="background:#333333" title="Gri"></button>
+                </div>
+              </div>
+
+              <div class="control-item" style="margin-top: 10px;">
+                <label>Yazı Rengi</label>
+                <div class="yt-color-presets" id="yt-fontcolor-presets">
+                  <button class="yt-color-btn active" data-color="#ffffff" style="background:#ffffff" title="Beyaz"></button>
+                  <button class="yt-color-btn" data-color="#ffff00" style="background:#ffff00" title="Sarı"></button>
+                  <button class="yt-color-btn" data-color="#00ff00" style="background:#00ff00" title="Yeşil"></button>
+                  <button class="yt-color-btn" data-color="#00ffff" style="background:#00ffff" title="Camgöbeği"></button>
+                  <button class="yt-color-btn" data-color="#ff6eb4" style="background:#ff6eb4" title="Pembe"></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+                </svg>
+                <span>Yorum Çevirisi</span>
+              </div>
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Yorumlara Çevir Butonu</div>
+                    <div class="toggle-desc">Her YouTube yorumunun altına Çevir butonu ekle. Hedef dil olarak yukarıdaki Hedef Dil kullanılır.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-comments-enabled" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polyline points="2 17 12 22 22 17"></polyline>
+                  <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+                <span>Aktif Video Çevirisi</span>
+              </div>
+
+              <div id="yt-no-video" class="yt-no-video">
+                <span>Altyazıları kontrol etmek için bir YouTube izleme sayfası açın.</span>
+              </div>
+
+              <div id="yt-video-controls" class="yt-video-controls" hidden>
+                <div class="control-item">
+                  <label>Kaynak Altyazı</label>
+                  <div class="custom-select" data-id="yt-popup-source">
+                    <button type="button" class="custom-select-trigger">
+                      <span>Altyazı yok / Aranıyor...</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options" id="yt-popup-source-options"></div>
+                    <input type="hidden" id="yt-popup-source" value="">
+                  </div>
+                </div>
+
+                <div class="yt-status-row">
+                  <span class="yt-status-label">Durum:</span>
+                  <span id="yt-popup-status" class="yt-status-value">Hazırlanıyor...</span>
+                </div>
+
+                <button id="yt-manual-translate" class="btn btn-primary" style="width:100%; margin-top:4px;">
+                  <span>Çeviriyi Başlat</span>
+                </button>
+
+                <div id="yt-popup-progress-block" class="progress-section" hidden style="margin-top:10px;">
+                  <div class="progress-header">
+                    <span>Çeviri İlerlemesi</span>
+                    <span id="yt-popup-progress-val">0%</span>
+                  </div>
+                  <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="yt-popup-progress-fill"></div>
+                  </div>
+                </div>
+
+                <div id="yt-popup-error" class="yt-error-msg" hidden></div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6H12L10 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6ZM20 18H4V8H20V18Z"></path>
+                </svg>
+                <span>Çeviri Önbelleği</span>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Otomatik Kaydet</div>
+                    <div class="toggle-desc">Çeviriler otomatik kaydedilir, tekrar izleyince hazır gelir.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="yt-auto-save" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="yt-cache-stats-row">
+                <span id="yt-cache-stats">Hesaplanıyor...</span>
+                <button type="button" id="yt-cache-clear-all" class="btn btn-secondary btn-small">Temizle</button>
+              </div>
+
+              <div class="yt-cache-list" id="yt-cache-list">
+                <div class="yt-cache-empty" id="yt-cache-empty">Henüz kaydedilmiş çeviri yok.</div>
+              </div>
+            </div>
+
+            <div class="yt-confirm-overlay" id="yt-cache-confirm" hidden>
+              <div class="yt-confirm-dialog">
+                <div class="yt-confirm-title">Önbelleği Temizle</div>
+                <div class="yt-confirm-msg">Kaydedilen tüm çeviriler silinecek. Emin misiniz?</div>
+                <div class="yt-confirm-actions">
+                  <button type="button" id="yt-cache-confirm-cancel" class="btn btn-secondary btn-small">Vazgeç</button>
+                  <button type="button" id="yt-cache-confirm-ok" class="btn btn-primary btn-small">Evet, Temizle</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-status-box status-success" id="yt-settings-status" hidden>
+              YouTube ayarları kaydedildi.
+            </div>
+          </div>
+          <div class="settings-floating-bar" id="yt-floating-bar" hidden>
+            <span class="settings-floating-hint">Kaydedilmemiş değişiklikler</span>
+            <div class="settings-floating-actions">
+              <button class="btn btn-secondary" id="yt-cancel">İptal</button>
+              <button class="btn btn-primary" id="yt-save">Kaydet</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-authenticator">
+          <div class="settings-form">
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <span>Doğrulayıcı (TOTP)</span>
+                <span class="badge" id="totp-timer" style="margin-left:auto;">30</span>
+              </div>
+
+              <div class="settings-group">
+                <label class="settings-label" for="totp-label">Yeni Hesap</label>
+                <input id="totp-label" class="text-input" placeholder="Hesap adı (örn. GitHub)" style="margin-bottom:8px;">
+                <div class="totp-add-row">
+                  <input id="totp-secret" class="text-input textarea-mono" placeholder="Gizli anahtar veya otpauth://..." wrap="off">
+                  <button class="btn btn-primary btn-small" id="totp-add-btn">Ekle</button>
+                </div>
+              </div>
+
+              <div class="yt-cache-list" id="totp-list">
+                <div class="yt-cache-empty">Henüz hesap yok.</div>
+              </div>
+
+              <div class="actions-row" style="margin-top:10px;">
+                <button class="btn btn-secondary btn-small" id="totp-import-btn">Dosyadan İçe Aktar</button>
+                <button class="btn btn-secondary btn-small" id="totp-export-btn">Yedek Al</button>
+                <input type="file" id="totp-file-input" accept=".json,.txt,application/json,text/plain" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;" tabindex="-1">
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-music">
+          <div class="settings-form">
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18V5l12-2v13"></path>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+                <span>Sekmedeki Müziği Bul</span>
+              </div>
+              <p class="input-helper">Sekmede çalan müziği bulana kadar dinler (en fazla 60 sn). Bulunca durur; istersen Durdur'a bas.</p>
+
+              <div class="actions-row" style="margin-top:8px;">
+                <button class="btn btn-primary" id="music-find-btn">
+                  <span>Müziği Bul</span>
+                  <div class="loader-spinner" hidden></div>
+                </button>
+              </div>
+
+              <div class="progress-section" id="music-progress-section" hidden>
+                <div class="progress-header">
+                  <span id="music-progress-label">Dinleniyor...</span>
+                  <span id="music-progress-percent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                  <div class="progress-bar-fill" id="music-progress-fill"></div>
+                </div>
+              </div>
+
+              <div class="result-card" id="music-result-card" hidden>
+                <div class="result-header">
+                  <span class="result-title">Bulunan Şarkı</span>
+                </div>
+                <div class="result-body markdown-content" id="music-output"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-sound">
+          <div class="settings-form">
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+                <span>Ses Mikseri</span>
+              </div>
+
+              <div class="yt-error-msg" id="sound-error" hidden></div>
+              <div class="yt-cache-list" id="sound-list">
+                <div class="yt-cache-empty">Yükleniyor...</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-settings">
+          <div class="settings-form">
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+                <span>Genel & API Ayarları</span>
+              </div>
+
+              <div class="settings-group">
+                <label class="settings-label">Tema</label>
+                <div class="custom-select" data-id="settings-theme">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Açık</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option active" data-value="light">Açık</div>
+                    <div class="custom-option" data-value="dark">Koyu</div>
+                  </div>
+                  <input type="hidden" id="settings-theme" value="light">
+                </div>
+                <p class="input-helper">Eklentinin görünümü.</p>
+              </div>
+
+              <div class="settings-group">
+                <div class="toggle-list" style="margin-bottom: 4px;">
+                  <div class="toggle-row">
+                    <div>
+                      <div class="toggle-title">Çoklu API Anahtarı Modu</div>
+                      <div class="toggle-desc">Birden fazla API anahtarı girerek rate-limit ve hataları önleyin.</div>
+                    </div>
+                    <label class="switch">
+                      <input type="checkbox" id="settings-use-multi-keys">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="single-key-container">
+                  <label for="settings-api-key" class="settings-label" style="margin-bottom: 8px;">
+                    <span>Google API Anahtarı</span>
+                    <span class="badge">Güvenli</span>
+                  </label>
+                  <div class="input-with-icon">
+                    <input type="password" id="settings-api-key" class="text-input" placeholder="AIzaSy...">
+                    <button class="btn-toggle-password" id="toggle-api-key-vis" type="button" title="Göster/Gizle">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="eye-icon">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div id="multi-key-container" hidden>
+                  <div class="multi-keys-head">
+                    <label for="settings-multi-api-keys" class="settings-label">
+                      <span>API Anahtarları (Her satırda bir tane)</span>
+                      <span class="badge" style="margin-left: 6px;">Güvenli</span>
+                    </label>
+                    <button class="btn-toggle-password" id="toggle-multi-key-vis" type="button" title="Göster/Gizle">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="eye-icon">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                  </div>
+                  <textarea id="settings-multi-api-keys" class="textarea-input textarea-mono" wrap="off" style="-webkit-text-security: disc;" placeholder="AIzaSy...&#10;AIzaSy..."></textarea>
+                  <div class="char-counter keys-count" id="multi-keys-count-label">0 anahtar</div>
+                </div>
+
+                <p class="input-helper" style="margin-top: 6px;">Bu API anahtarı extension üzerindeki tüm yapay zeka özellikleri için kullanılır.</p>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Model İsmi</label>
+                <div class="custom-select" data-id="settings-model-name">
+                  <button type="button" class="custom-select-trigger">
+                    <span>gemini-3.8-flash</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option active" data-value="gemini-3.8-flash">gemini-3.8-flash</div>
+                    <div class="custom-option" data-value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</div>
+                  </div>
+                  <input type="hidden" id="settings-model-name" value="gemini-3.8-flash">
+                </div>
+                <p class="input-helper">Google Gemini modeli. Varsayılan olarak <code>gemini-3.8-flash</code> kullanılır.</p>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">Düşünme Seviyesi</label>
+                <div class="custom-select" data-id="settings-thinking-level">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Minimal</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options">
+                    <div class="custom-option" data-value="NONE">Yok (None)</div>
+                    <div class="custom-option active" data-value="MINIMAL">Minimal</div>
+                    <div class="custom-option" data-value="LOW">Düşük (Low)</div>
+                    <div class="custom-option" data-value="MEDIUM">Orta (Medium)</div>
+                    <div class="custom-option" data-value="HIGH">Yüksek (High)</div>
+                  </div>
+                  <input type="hidden" id="settings-thinking-level" value="MINIMAL">
+                </div>
+                <p class="input-helper">Yapay zeka modelinin düşünme/akıl yürütme seviyesi. Varsayılan olarak <code>Minimal</code> kullanılır.</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+                <span>Seçim & Genel Özellikler</span>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Metin Seçip Çevirme</div>
+                    <div class="toggle-desc">Metin seçildiğinde yüzen Gemini butonunu göster.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-selection-translate" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Metin Seçip Arama</div>
+                    <div class="toggle-desc">Metin seçildiğinde yüzen Google Arama butonunu göster.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-selection-search" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Sağ Tık: Görsel Çevir</div>
+                    <div class="toggle-desc">Sağ tık menüsünde alan seçerek görsel çevir öğesini göster.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-visual-menu">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Görsel Çevir Kısayolu</div>
+                    <div class="toggle-desc" id="visual-shortcut-desc">Yükleniyor...</div>
+                    <div class="toggle-desc">Chrome, kısayol atamasını eklenti içinden yapmaya izin vermez; aşağıdaki düğme seni atama ekranına götürür.</div>
+                  </div>
+                  <button class="btn btn-secondary btn-small" id="visual-shortcut-btn" style="flex-shrink:0;">Değiştir</button>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="settings-select-grid">
+                  <div class="control-item">
+                    <label>Arama Stili</label>
+                    <div class="custom-select" data-id="settings-search-mode">
+                      <button type="button" class="custom-select-trigger">
+                        <span>Yeni Sekmede Aç</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                      </button>
+                      <div class="custom-select-options">
+                        <div class="custom-option active" data-value="tab">Yeni Sekmede Aç</div>
+                        <div class="custom-option" data-value="pip">Sayfa İçi Pencere (PiP)</div>
+                      </div>
+                      <input type="hidden" id="settings-search-mode" value="tab">
+                    </div>
+                  </div>
+                  <div class="control-item">
+                    <label>Çevirme Stili</label>
+                    <div class="custom-select" data-id="settings-select-translate-mode">
+                      <button type="button" class="custom-select-trigger">
+                        <span>Balon Pencere</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                      </button>
+                      <div class="custom-select-options">
+                        <div class="custom-option active" data-value="bubble">Balon Pencere</div>
+                        <div class="custom-option" data-value="inline">Yerinde Çevir</div>
+                      </div>
+                      <input type="hidden" id="settings-select-translate-mode" value="bubble">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="control-item" id="inline-target-lang-group" hidden style="margin-top: 12px;">
+                  <label>Yerinde Çeviri Hedef Dili</label>
+                  <div class="custom-select" data-id="settings-inline-target-lang">
+                    <button type="button" class="custom-select-trigger">
+                      <span>Türkçe</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options"></div>
+                    <input type="hidden" id="settings-inline-target-lang" value="tr">
+                  </div>
+                  <p class="input-helper">Yerinde çeviride pencere açılmadığı için hedef dil buradan seçilir.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path>
+                </svg>
+                <span>X (Twitter) Çeviri Ayarları</span>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">X (Twitter) Çeviri Butonu</div>
+                    <div class="toggle-desc">Tweetlerin yanına Gemini Çevir butonu enjekte et.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-x-translate" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Tweetleri Otomatik Çevir</div>
+                    <div class="toggle-desc">Tweet dili hedef dilden farklıysa kaydırırken otomatik çevir.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-x-auto-translate">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">X Çeviri Önbelleği</div>
+                    <div class="toggle-desc">Çevrilen tweetler kaydedilir; tekrar karşılaştığında otomatik gösterilir.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-x-cache" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Önbelleği Temizle</div>
+                    <div class="toggle-desc">Kaydedilen tüm tweet çevirilerini siler.</div>
+                  </div>
+                  <button class="btn btn-secondary btn-small" id="settings-x-cache-clear">Temizle</button>
+                </div>
+              </div>
+
+              <div class="settings-group" style="margin-top: 14px;">
+                <label class="settings-label">X Çeviri Hedef Dili</label>
+                <div class="custom-select" data-id="settings-x-target-lang">
+                  <button type="button" class="custom-select-trigger">
+                    <span>Türkçe</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div class="custom-select-options"></div>
+                  <input type="hidden" id="settings-x-target-lang" value="tr">
+                </div>
+                <p class="input-helper">X (Twitter) üzerinde çevrilecek hedef dil.</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polyline points="2 17 12 22 22 17"></polyline>
+                  <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+                <span>Gemini Site Özelleştirmeleri</span>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Personal Intelligence Kapatıcı</div>
+                    <div class="toggle-desc">Gemini sitesinde otomatik açılan Personal Intelligence toggle'ını otomatik kapatır.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-pi-disabler" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Animasyonları Kapat (Hızlandırıcı)</div>
+                    <div class="toggle-desc">CSS geçiş/animasyon efektlerini kapatarak hızı artırır.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-gemini-speedup" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Notebooks Kısmını Gizle</div>
+                    <div class="toggle-desc">Sol menüdeki kullanılmayan Notebooks bölümünü gizler.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-gemini-hide-notebooks" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-divider"></div>
+
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Upgrade Butonunu Gizle</div>
+                    <div class="toggle-desc">Sağ üstteki Upgrade (Yükselt) butonunu gizler.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-gemini-hide-upgrade" checked>
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Yedekleme</span>
+              </div>
+              <p class="input-helper" style="margin-bottom:10px;">Tüm ayarlar ve önbellekler (X çevirileri, YouTube çevirileri, doğrulayıcı hesapları dahil) tek dosyaya indirilir ve geri yüklenebilir. Dosya API anahtarı ve gizli kodlar içerir, kimseyle paylaşma.</p>
+              <div class="actions-row" style="margin:0;justify-content:flex-start;">
+                <button class="btn btn-secondary btn-small" id="settings-backup-export">Yedeği İndir</button>
+                <button class="btn btn-secondary btn-small" id="settings-backup-import">Yedekten Yükle</button>
+                <input type="file" id="settings-backup-file" accept=".json,application/json" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;" tabindex="-1">
+              </div>
+            </div>
+
+            <div class="settings-status-box status-success" id="settings-status" hidden>
+              Ayarlar başarıyla kaydedildi.
+            </div>
+          </div>
+          <div class="settings-floating-bar" id="settings-floating-bar" hidden>
+            <span class="settings-floating-hint">Kaydedilmemiş değişiklikler</span>
+            <div class="settings-floating-actions">
+              <button class="btn btn-secondary" id="settings-cancel">İptal</button>
+              <button class="btn btn-secondary" id="settings-reset">Varsayılana Dön</button>
+              <button class="btn btn-primary" id="settings-save">Kaydet</button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="shazam-sig.js?v=1.4"></script>
+  <script src="popup.js?v=1.4"></script>
+</body>
+</html>
