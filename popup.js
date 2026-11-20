@@ -346,7 +346,7 @@ function ensurePanelInit(tabId) {
 // STORAGE UTILITIES
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["apiKey", "modelName", "modelMode", "popupTheme", "selectionTranslationEnabled", "selectionSearchEnabled", "visualMenuEnabled", "imageTranslateBtnPos", "imageTranslateTargetLang", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "thinkingLevel", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "useMultiKeys", "geminiApiKeys", "transSource", "transTarget", "separateTranslationEngine", "translationProvider", "deeplApiKey"], (result) => {
+    chrome.storage.local.get(["apiKey", "modelName", "modelMode", "popupTheme", "selectionTranslationEnabled", "selectionSearchEnabled", "visualMenuEnabled", "imageTranslateBtnPos", "imageTranslateTargetLang", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xVideoTranslateEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "thinkingLevel", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "useMultiKeys", "geminiApiKeys", "transSource", "transTarget", "separateTranslationEngine", "translationProvider", "deeplApiKey"], (result) => {
       resolve({
         separateTranslationEngine: !!result.separateTranslationEngine,
         translationProvider: (result.translationProvider === "deepl" || result.translationProvider === "google") ? result.translationProvider : "google",
@@ -364,6 +364,7 @@ function getSettings() {
         selectionTranslateMode: result.selectionTranslateMode || "bubble",
         inlineTargetLang: result.inlineTargetLang || "tr",
         xTranslationEnabled: result.xTranslationEnabled !== false,
+        xVideoTranslateEnabled: result.xVideoTranslateEnabled !== false,
         xAutoTranslateEnabled: !!result.xAutoTranslateEnabled,
         xCacheEnabled: result.xCacheEnabled !== false,
         xTargetLang: result.xTargetLang || "tr",
@@ -1038,6 +1039,8 @@ function initSettingsUI(settings) {
   });
 
   document.getElementById("settings-x-translate").checked = settings.xTranslationEnabled;
+  const xVidEl = document.getElementById("settings-x-video-translate");
+  if (xVidEl) xVidEl.checked = settings.xVideoTranslateEnabled !== false;
   document.getElementById("settings-x-auto-translate").checked = settings.xAutoTranslateEnabled;
   document.getElementById("settings-x-cache").checked = settings.xCacheEnabled;
   
@@ -1222,6 +1225,7 @@ function setupSettingsActions() {
     const selectionTranslateMode = document.getElementById("settings-select-translate-mode").value;
     const inlineTargetLang = document.getElementById("settings-inline-target-lang").value;
     const xTranslationEnabled = document.getElementById("settings-x-translate").checked;
+    const xVideoTranslateEnabled = document.getElementById("settings-x-video-translate") ? document.getElementById("settings-x-video-translate").checked : true;
     const xAutoTranslateEnabled = document.getElementById("settings-x-auto-translate").checked;
     const xCacheEnabled = document.getElementById("settings-x-cache").checked;
     const xTargetLang = document.getElementById("settings-x-target-lang").value;
@@ -1272,6 +1276,7 @@ function setupSettingsActions() {
       selectionTranslateMode,
       inlineTargetLang,
       xTranslationEnabled,
+      xVideoTranslateEnabled,
       xAutoTranslateEnabled,
       xCacheEnabled,
       xTargetLang,
@@ -1344,6 +1349,7 @@ function setupSettingsActions() {
       updateCustomSelectUI("settings-inline-target-lang");
     }
     document.getElementById("settings-x-translate").checked = true;
+    if (document.getElementById("settings-x-video-translate")) document.getElementById("settings-x-video-translate").checked = true;
     document.getElementById("settings-x-auto-translate").checked = false;
     document.getElementById("settings-x-cache").checked = true;
     const xTargetLangInput = document.getElementById("settings-x-target-lang");
@@ -1378,6 +1384,7 @@ function setupSettingsActions() {
       selectionTranslateMode: "bubble",
       inlineTargetLang: "tr",
       xTranslationEnabled: true,
+      xVideoTranslateEnabled: true,
       xAutoTranslateEnabled: false,
       xCacheEnabled: true,
       xTargetLang: "tr",
@@ -1440,6 +1447,7 @@ function setupSettingsActions() {
         selectionTranslateMode: document.getElementById("settings-select-translate-mode").value,
         inlineTargetLang: document.getElementById("settings-inline-target-lang").value,
         xTranslationEnabled: document.getElementById("settings-x-translate").checked,
+        xVideoTranslateEnabled: document.getElementById("settings-x-video-translate") ? document.getElementById("settings-x-video-translate").checked : true,
         xAutoTranslateEnabled: document.getElementById("settings-x-auto-translate").checked,
         xCacheEnabled: document.getElementById("settings-x-cache").checked,
         xTargetLang: document.getElementById("settings-x-target-lang").value,

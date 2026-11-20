@@ -188,7 +188,7 @@ chrome.runtime.onInstalled.addListener(() => {
   try { chrome.storage.local.remove(["dsToken", "dsChats", "dsActiveId", "dsLastResult", "dsVerifiedAt", "dsWasmBin", "dsWasmUrl"]); } catch (e) {}
   // Eski varsayilan gemini-3.8-flash / 3.6-flash kurulumlarini manuel secim degilse gemini-4-hydrogen'e gecir
   try {
-    chrome.storage.local.get(["modelName", "modelMode", "geminiModel", "ytModelMode", "imageTranslateBtnPos", "imageTranslateTargetLang"], (r) => {
+    chrome.storage.local.get(["modelName", "modelMode", "geminiModel", "ytModelMode", "imageTranslateBtnPos", "imageTranslateTargetLang", "xVideoTranslateEnabled"], (r) => {
       const patch = {};
       if (r.modelMode !== "custom" && (!r.modelName || r.modelName === "gemini-3.8-flash" || r.modelName === "gemini-3.6-flash")) {
         patch.modelName = DEFAULT_MODEL;
@@ -198,6 +198,7 @@ chrome.runtime.onInstalled.addListener(() => {
       }
       if (!r.imageTranslateBtnPos) patch.imageTranslateBtnPos = "right";
       if (!r.imageTranslateTargetLang) patch.imageTranslateTargetLang = "tr";
+      if (r.xVideoTranslateEnabled === undefined) patch.xVideoTranslateEnabled = true;
       if (Object.keys(patch).length > 0) chrome.storage.local.set(patch);
     });
   } catch (e) { void e; }
@@ -487,6 +488,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((json) => sendResponse({ success: true, json }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
 
+    return true;
+  } else if (message.action === "x-video-load-vtt") {
+    handleXVideoLoadVtt(message.m3u8Url, message.preferredLang || "")
+      .then((res) => sendResponse(Object.assign({ success: true }, res)))
+      .catch((err) => sendResponse({ success: false, error: err.message || "X video altyazısı alınamadı." }));
+    return true;
+  } else if (message.action === "x-video-transcribe-translate") {
+    handleXVideoAudioFallback(message.mp4Url, message.targetLang || "tr")
+      .then((cues) => sendResponse({ success: true, cues }))
+      .catch((err) => sendResponse({ success: false, error: err.message || "Video sesinden altyazı üretilemedi." }));
     return true;
   }
 });
@@ -1553,4 +1564,209 @@ async function handleImageTranslatePipeline({ imageSrc, imageDataUrl, targetLang
     IMG_TRANS_CACHE.delete(IMG_TRANS_CACHE.keys().next().value);
   }
   return finalRes;
+}
+
+// ==========================================
+// X (TWITTER) VİDEO ALTYAZI ÇEKİMİ (HLS .m3u8 -> .vtt + MP4 Ses Yedek)
+// ==========================================
+function isAllowedXMediaUrl(urlStr) {
+  try {
+    const u = new URL(String(urlStr || ""));
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    return /(?:^|\.)(?:twimg\.com|x\.com|twitter\.com)$/i.test(u.hostname);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function fetchXMediaText(urlStr) {
+  if (!isAllowedXMediaUrl(urlStr)) {
+    throw new Error("Geçersiz veya desteklenmeyen X medya bağlantısı.");
+  }
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(urlStr, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Medya akışı indirilemedi (HTTP ${res.status}).`);
+    return await res.text();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function parseM3u8AttrList(attrStr) {
+  const attrs = {};
+  const re = /([A-Z0-9-]+)=("([^"]*)"|([^,]*))/gi;
+  let m;
+  while ((m = re.exec(attrStr)) !== null) {
+    attrs[m[1].toUpperCase()] = m[3] !== undefined ? m[3] : (m[4] || "").trim();
+  }
+  return attrs;
+}
+
+async function handleXVideoLoadVtt(m3u8Url, preferredLang) {
+  const masterText = await fetchXMediaText(m3u8Url);
+  const tracks = [];
+  const lines = masterText.split(/\r?\n/);
+
+  for (const line of lines) {
+    if (!line.startsWith("#EXT-X-MEDIA:")) continue;
+    const attrs = parseM3u8AttrList(line.slice(13));
+    if ((attrs.TYPE || "").toUpperCase() !== "SUBTITLES" || !attrs.URI) continue;
+    let absUri = "";
+    try {
+      absUri = new URL(attrs.URI, m3u8Url).href;
+    } catch (e) { continue; }
+    if (!isAllowedXMediaUrl(absUri)) continue;
+    const characteristics = attrs.CHARACTERISTICS || "";
+    tracks.push({
+      language: (attrs.LANGUAGE || "en").trim(),
+      name: (attrs.NAME || attrs.LANGUAGE || "Altyazı").trim(),
+      uri: absUri,
+      isAuto: /auto-generated/i.test(characteristics) || /auto-generated/i.test(attrs.NAME || ""),
+      isDefault: (attrs.DEFAULT || "").toUpperCase() === "YES"
+    });
+  }
+
+  if (tracks.length === 0) {
+    return { tracks: [], activeTrack: null, vttTexts: [] };
+  }
+
+  // Track secimi: manuel altyazi > tercih edilen dil > ilk track
+  const pref = String(preferredLang || "").split("-")[0].toLowerCase();
+  let chosen =
+    (pref ? tracks.find((t) => !t.isAuto && t.language.toLowerCase().startsWith(pref)) : null) ||
+    tracks.find((t) => !t.isAuto) ||
+    (pref ? tracks.find((t) => t.language.toLowerCase().startsWith(pref)) : null) ||
+    tracks.find((t) => t.isDefault) ||
+    tracks[0];
+
+  const subPlText = await fetchXMediaText(chosen.uri);
+  const segUrls = [];
+  const segLines = subPlText.split(/\r?\n/);
+  for (let i = 0; i < segLines.length; i++) {
+    const ln = segLines[i].trim();
+    if (!ln || ln.startsWith("#")) continue;
+    try {
+      const segAbs = new URL(ln, chosen.uri).href;
+      if (isAllowedXMediaUrl(segAbs)) segUrls.push(segAbs);
+    } catch (e) { void e; }
+  }
+
+  if (segUrls.length === 0) {
+    return { tracks, activeTrack: chosen, vttTexts: [] };
+  }
+
+  const vttTexts = await Promise.all(segUrls.map((u) => fetchXMediaText(u)));
+  return { tracks, activeTrack: chosen, vttTexts };
+}
+
+function uint8ToBase64Chunked(bytes) {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const sub = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+    binary += String.fromCharCode.apply(null, sub);
+  }
+  return btoa(binary);
+}
+
+async function handleXVideoAudioFallback(mp4Url, targetLang) {
+  if (!mp4Url || !isAllowedXMediaUrl(mp4Url)) {
+    throw new Error("Bu videoda yerleşik altyazı akışı bulunamadı.");
+  }
+  const settings = await loadTranslationEngineSettings();
+  const apiKeys = settings.useMultiKeys
+    ? settings.geminiApiKeys.split("\n").map((k) => k.trim()).filter(Boolean)
+    : (settings.apiKey && settings.apiKey.trim() ? [settings.apiKey.trim()] : []);
+  if (apiKeys.length === 0) {
+    throw new Error("Bu videoda yerleşik altyazı yok ve sesten çeviri için Gemini API anahtarı tanımlı değil.");
+  }
+
+  const headController = new AbortController();
+  const headTimer = setTimeout(() => headController.abort(), 35000);
+  let buf;
+  try {
+    const res = await fetch(mp4Url, { signal: headController.signal });
+    if (!res.ok) throw new Error(`Video indirilemedi (HTTP ${res.status}).`);
+    const len = Number(res.headers.get("content-length") || 0);
+    if (len > 12 * 1024 * 1024) {
+      throw new Error("Bu videoda altyazı yok ve dosya boyutu sesten çeviri sınırını (12 MB) aşıyor.");
+    }
+    buf = await res.arrayBuffer();
+  } finally {
+    clearTimeout(headTimer);
+  }
+
+  if (buf.byteLength > 12 * 1024 * 1024) {
+    throw new Error("Bu videoda altyazı yok ve dosya boyutu sesten çeviri sınırını (12 MB) aşıyor.");
+  }
+
+  const base64 = uint8ToBase64Chunked(new Uint8Array(buf));
+  const targetLabel = LANG_LABELS[targetLang] || "Türkçe";
+  const prompt = [
+    `Listen to all spoken speech in this video and return accurate time-synced subtitles translated directly into natural ${targetLabel}.`,
+    `Return ONLY a JSON object with a "cues" array: {"cues":[{"startMs":number,"endMs":number,"text":"translated subtitle"}]}.`,
+    "Keep each subtitle concise (1-2 sentences, natural spoken phrasing) synced cleanly with the speech timestamps in milliseconds."
+  ].join("\n");
+
+  const requestBody = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: "video/mp4", data: base64 } }
+      ]
+    }],
+    generationConfig: applyThinkingConfig({
+      temperature: 0.2,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          cues: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                startMs: { type: "INTEGER" },
+                endMs: { type: "INTEGER" },
+                text: { type: "STRING" }
+              },
+              required: ["startMs", "endMs", "text"]
+            }
+          }
+        },
+        required: ["cues"]
+      },
+      maxOutputTokens: thinkingMaxTokens(16384, settings.thinkingLevel)
+    }, settings.thinkingLevel)
+  };
+
+  let lastError = null;
+  const bodies = geminiRequestVariants(requestBody);
+  for (let i = 0; i < apiKeys.length; i++) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.modelName)}:generateContent?key=${apiKeys[i]}`;
+    for (let v = 0; v < bodies.length; v++) {
+      try {
+        const data = await postGeminiBody(url, bodies[v]);
+        const rawText = extractGeminiText(data);
+        if (!rawText) throw new Error("Gemini API boş yanıt döndü.");
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+        const parsed = JSON.parse(cleaned);
+        const cues = parsed && Array.isArray(parsed.cues) ? parsed.cues : [];
+        if (cues.length === 0) throw new Error("Videoda konuşma bulunamadı.");
+        return cues.map((c, idx) => ({
+          id: idx,
+          startMs: Math.max(0, Number(c.startMs) || 0),
+          endMs: Math.max((Number(c.startMs) || 0) + 800, Number(c.endMs) || 0),
+          text: String(c.text || "").trim()
+        })).filter((c) => c.text);
+      } catch (err) {
+        if (v < bodies.length - 1 && geminiThinkingRejected(err)) continue;
+        lastError = err;
+        break;
+      }
+    }
+  }
+  throw lastError || new Error("Video sesinden altyazı üretilemedi.");
 }

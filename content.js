@@ -76,6 +76,7 @@
   let selectionTranslateMode = "bubble";
   let inlineTargetLang = "tr";
   let xTranslationEnabled = true;
+  let xVideoTranslateEnabled = true;
   let xAutoTranslateEnabled = false;
   let xCacheEnabled = true;
   let xTargetLang = "tr";
@@ -91,13 +92,14 @@
   const isGemini = window.location.hostname.includes("gemini.google.com");
 
   // Load settings from local storage
-  chrome.storage.local.get(["selectionTranslationEnabled", "selectionSearchEnabled", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "translatorTargetLang", "popupTheme", "imageTranslateBtnPos", "imageTranslateTargetLang"], (result) => {
+  chrome.storage.local.get(["selectionTranslationEnabled", "selectionSearchEnabled", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xVideoTranslateEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "translatorTargetLang", "popupTheme", "imageTranslateBtnPos", "imageTranslateTargetLang"], (result) => {
     selectionTranslationEnabled = result.selectionTranslationEnabled !== false;
     selectionSearchEnabled = result.selectionSearchEnabled !== false;
     searchMode = result.searchMode || "tab";
     selectionTranslateMode = result.selectionTranslateMode || "bubble";
     inlineTargetLang = result.inlineTargetLang || "tr";
     xTranslationEnabled = result.xTranslationEnabled !== false;
+    xVideoTranslateEnabled = result.xVideoTranslateEnabled !== false;
     xAutoTranslateEnabled = !!result.xAutoTranslateEnabled;
     xCacheEnabled = result.xCacheEnabled !== false;
     xTargetLang = result.xTargetLang || "tr";
@@ -127,6 +129,9 @@
         initXTranslation();
       });
     }
+    if (isX && xVideoTranslateEnabled && typeof initXVideoSubtitles === "function") {
+      initXVideoSubtitles();
+    }
 
     if (isGemini) {
       initGeminiOptimizations();
@@ -149,6 +154,18 @@
       if (!selectionTranslationEnabled && !selectionSearchEnabled) {
         hideWidget();
       }
+    }
+    if (changes.xVideoTranslateEnabled || changes.xTargetLang) {
+      chrome.storage.local.get(["xVideoTranslateEnabled", "xTargetLang"], (res) => {
+        xVideoTranslateEnabled = res.xVideoTranslateEnabled !== false;
+        xTargetLang = res.xTargetLang || "tr";
+        if (isX && typeof stopXVideoSubtitles === "function") {
+          stopXVideoSubtitles();
+          if (xVideoTranslateEnabled && typeof initXVideoSubtitles === "function") {
+            initXVideoSubtitles();
+          }
+        }
+      });
     }
     if (changes.xTranslationEnabled || changes.xAutoTranslateEnabled || changes.xTargetLang) {
       chrome.storage.local.get(["xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang"], (res) => {
@@ -4500,6 +4517,11 @@
 
   function syncImageTranslateTheme(theme) {
     imgTheme = theme || "light";
+    try {
+      document.querySelectorAll("[data-gemini-xv-embed]").forEach((el) => {
+        el.setAttribute("data-theme", imgTheme);
+      });
+    } catch (e) { void e; }
     if (hoverState && hoverState.anchor) hoverState.anchor.setAttribute("data-theme", imgTheme);
     for (const st of imgStates.values()) {
       if (st.anchor) st.anchor.setAttribute("data-theme", imgTheme);
@@ -5040,5 +5062,917 @@
       else syncEmbeddedAnchorBounds(img, st.container, st.anchor);
     }
   }, { passive: true });
+
+
+  // ==========================================
+  // X (TWITTER) VİDEO ALTYAZI ÇEVİRİCİ
+  // ==========================================
+  const X_VID_STORAGE_KEY = "xVideoSubtitleCache";
+  const X_VID_CACHE_MAX = 30;
+  const xVidMetaByMediaId = new Map();
+  const xVidStates = new WeakMap();
+  const xVidActiveVideos = new Set();
+  const xVidPendingQueries = new Map();
+  let xVidQuerySeq = 0;
+  let xVidTokenSeq = 0;
+  let xVidMutationObserver = null;
+  let xVidScanTimer = null;
+  let xVidMemCache = {};
+  let xVidMemLoaded = false;
+
+  const X_VID_SHADOW_CSS = `
+    :host {
+      --xv-bg: rgba(15, 20, 25, 0.80);
+      --xv-border: rgba(255, 255, 255, 0.18);
+      --xv-text: #f8fafc;
+      --xv-accent: #14b8a6;
+      --xv-hover: rgba(15, 20, 25, 0.94);
+      position: absolute;
+      inset: 0;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+      overflow: hidden;
+      z-index: 4;
+      container-type: inline-size;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
+    }
+    :host([data-theme="fresh"]) {
+      --xv-bg: rgba(13, 36, 34, 0.84);
+      --xv-border: rgba(20, 184, 166, 0.44);
+      --xv-accent: #2dd4bf;
+      --xv-hover: rgba(13, 148, 136, 0.94);
+    }
+    * { box-sizing: border-box; }
+    .xv-pill,
+    .xv-ctrl-bar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid var(--xv-border);
+      background: var(--xv-bg);
+      color: var(--xv-text);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      pointer-events: auto;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
+      transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease, transform 140ms ease;
+    }
+    .xv-pill {
+      padding: 0 10px;
+      cursor: pointer;
+      opacity: 0.86;
+    }
+    .xv-pill:hover {
+      opacity: 1;
+      background: var(--xv-hover);
+      border-color: var(--xv-accent);
+    }
+    .xv-pill:active { transform: scale(0.96); }
+    .xv-pill svg { color: var(--xv-accent); flex-shrink: 0; }
+    .xv-ctrl-bar {
+      padding: 0 5px;
+      gap: 3px;
+    }
+    .xv-ctrl-bar.is-error {
+      border-color: rgba(248, 113, 113, 0.6);
+      color: #fecaca;
+    }
+    .xv-ctrl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 5px;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: inherit;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    .xv-ctrl-btn:hover { background: rgba(255, 255, 255, 0.15); }
+    .xv-ctrl-btn.active { color: var(--xv-accent); }
+    .xv-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: var(--xv-accent);
+      border-radius: 50%;
+      animation: xvSpin 650ms linear infinite;
+      flex-shrink: 0;
+      margin-left: 4px;
+    }
+    .xv-status {
+      padding: 0 6px 0 3px;
+      white-space: nowrap;
+      max-width: 230px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .xv-sub-wrap {
+      position: absolute;
+      left: 5%;
+      right: 5%;
+      bottom: 13%;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      pointer-events: none;
+      text-align: center;
+    }
+    .xv-sub-text {
+      display: inline-block;
+      max-width: 100%;
+      padding: 5px 12px;
+      border-radius: 7px;
+      background: rgba(10, 12, 16, 0.78);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      color: #ffffff;
+      font-size: clamp(13px, 3.1cqw, 22px);
+      font-weight: 700;
+      line-height: 1.32;
+      text-align: center;
+      white-space: pre-wrap;
+      word-break: break-word;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    }
+    .xv-sub-text:empty { display: none; }
+    @keyframes xvSpin { to { transform: rotate(360deg); } }
+  `;
+
+  const XV_CC_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M10 10a2.5 2.5 0 1 0 0 4"/><path d="M17 10a2.5 2.5 0 1 0 0 4"/></svg>';
+
+  // WebVTT zaman damgasi -> milisaniye
+  function parseVttTimestampMs(str) {
+    const m = /^(\d{1,2}:)?(\d{1,2}):(\d{2})[.,](\d{3})$/.exec(String(str || "").trim());
+    if (!m) return NaN;
+    const h = m[1] ? parseInt(m[1].slice(0, -1), 10) : 0;
+    const min = parseInt(m[2], 10);
+    const sec = parseInt(m[3], 10);
+    const ms = parseInt(m[4], 10);
+    return ((h * 60 + min) * 60 + sec) * 1000 + ms;
+  }
+
+  function cleanVttCueText(raw) {
+    return String(raw || "")
+      .replace(/<X-word-ms[^>]*>/gi, "")
+      .replace(/<\/X-word-ms>/gi, "")
+      .replace(/<[^>]{1,120}>/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // X'in <X-word-ms> VTT parcalarindaki tekrarlayan ortusmeleri ("as a" + "as a storyteller")
+  // ve kisa kirpintilari temizleyip cumle/obek duzeyinde zamanli altyaziya donusturur.
+  function parseAndMergeXWebVtt(vttTexts) {
+    const rawCues = [];
+    const list = Array.isArray(vttTexts) ? vttTexts : [vttTexts];
+
+    for (const vtt of list) {
+      const blocks = String(vtt || "").replace(/\r/g, "").split(/\n{2,}/);
+      for (const blk of blocks) {
+        const lines = blk.split("\n").map((l) => l.trimEnd());
+        const arrowIdx = lines.findIndex((l) => l.includes("-->"));
+        if (arrowIdx < 0) continue;
+        const times = lines[arrowIdx].split("-->");
+        if (times.length < 2) continue;
+        const startMs = parseVttTimestampMs(times[0].trim().split(/\s+/)[0]);
+        const endMs = parseVttTimestampMs(times[1].trim().split(/\s+/)[0]);
+        if (!isFinite(startMs) || !isFinite(endMs) || endMs <= startMs) continue;
+        const text = cleanVttCueText(lines.slice(arrowIdx + 1).join(" "));
+        if (!text) continue;
+        rawCues.push({ startMs, endMs, text });
+      }
+    }
+
+    if (rawCues.length === 0) return [];
+    rawCues.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+
+    // 1. Kayan ASR on-ek tekrarlarini ("as a" -> "as a storyteller") temizle
+    const deduped = [];
+    for (let i = 0; i < rawCues.length; i++) {
+      let cur = rawCues[i];
+      if (deduped.length === 0) {
+        deduped.push({ ...cur });
+        continue;
+      }
+      const prev = deduped[deduped.length - 1];
+      const prevWords = prev.text.split(/\s+/).filter(Boolean);
+      const curWords = cur.text.split(/\s+/).filter(Boolean);
+      const closeInTime = cur.startMs <= prev.endMs + 700;
+
+      if (closeInTime) {
+        // Birebir ayni veya alt-kume ("as a" -> "as a storyteller")
+        if (cur.text.toLowerCase() === prev.text.toLowerCase()) {
+          if (cur.endMs > prev.endMs) prev.endMs = cur.endMs;
+          continue;
+        }
+        if (
+          prevWords.length <= 4 &&
+          curWords.length > prevWords.length &&
+          cur.text.toLowerCase().startsWith(prev.text.toLowerCase() + " ")
+        ) {
+          prev.text = cur.text;
+          if (cur.endMs > prev.endMs) prev.endMs = cur.endMs;
+          continue;
+        }
+        // Kuyruk-bas kelime ortusmesi ("... job as a" + "as a storyteller" -> "storyteller")
+        const maxOv = Math.min(4, prevWords.length, curWords.length);
+        let ovLen = 0;
+        for (let k = maxOv; k >= 1; k--) {
+          const tail = prevWords.slice(-k).join(" ").toLowerCase();
+          const head = curWords.slice(0, k).join(" ").toLowerCase();
+          if (tail === head) {
+            ovLen = k;
+            break;
+          }
+        }
+        if (ovLen > 0) {
+          const rem = curWords.slice(ovLen).join(" ").trim();
+          if (!rem) {
+            if (cur.endMs > prev.endMs) prev.endMs = cur.endMs;
+            continue;
+          }
+          cur = { startMs: cur.startMs, endMs: cur.endMs, text: rem };
+        }
+      }
+      deduped.push({ ...cur });
+    }
+
+    // 2. Kisa kirpintilari okunabilir 1-2 obeklik altyazi satirlarina birlestir
+    const merged = [];
+    let cur = null;
+    const flush = () => {
+      if (cur && cur.text.trim()) {
+        merged.push({ id: merged.length, startMs: cur.startMs, endMs: cur.endMs, text: cur.text.trim() });
+      }
+      cur = null;
+    };
+
+    for (let i = 0; i < deduped.length; i++) {
+      const c = deduped[i];
+      if (!cur) {
+        cur = { startMs: c.startMs, endMs: c.endMs, text: c.text };
+      } else {
+        const gap = c.startMs - cur.endMs;
+        const win = c.endMs - cur.startMs;
+        const candidate = (cur.text + " " + c.text).replace(/\s+/g, " ").trim();
+        const prevEnds = /[.?!…]["'”’)\]]?$/.test(cur.text);
+        if (gap >= 700 || win > 4600 || candidate.length > 96 || (prevEnds && cur.text.length >= 26)) {
+          flush();
+          cur = { startMs: c.startMs, endMs: c.endMs, text: c.text };
+        } else {
+          cur.text = candidate;
+          if (c.endMs > cur.endMs) cur.endMs = c.endMs;
+        }
+      }
+    }
+    flush();
+
+    // 3. Zaman sinirlarini temizle (yapisik sonraki satir gelince eskisi ust uste binmesin)
+    for (let i = 0; i < merged.length; i++) {
+      const m = merged[i];
+      const next = merged[i + 1];
+      if (next && m.endMs > next.startMs - 40) {
+        m.endMs = Math.max(m.startMs + 450, next.startMs - 40);
+      }
+      if (m.endMs - m.startMs < 900) {
+        m.endMs = next ? Math.min(next.startMs - 40, m.startMs + 1600) : m.startMs + 1800;
+      }
+      if (m.endMs <= m.startMs) m.endMs = m.startMs + 600;
+    }
+    return merged;
+  }
+
+  function loadXVideoCacheFromStorage() {
+    if (xVidMemLoaded) return Promise.resolve();
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([X_VID_STORAGE_KEY], (res) => {
+          xVidMemCache = (res && res[X_VID_STORAGE_KEY] && typeof res[X_VID_STORAGE_KEY] === "object")
+            ? res[X_VID_STORAGE_KEY]
+            : {};
+          xVidMemLoaded = true;
+          resolve();
+        });
+      } catch (e) {
+        xVidMemLoaded = true;
+        resolve();
+      }
+    });
+  }
+
+  function saveXVideoCacheEntry(key, cues, trackLang) {
+    if (!key || !Array.isArray(cues) || cues.length === 0) return;
+    xVidMemCache[key] = { cues, trackLang: trackLang || "", ts: Date.now() };
+    const keys = Object.keys(xVidMemCache);
+    if (keys.length > X_VID_CACHE_MAX) {
+      keys.sort((a, b) => (xVidMemCache[a].ts || 0) - (xVidMemCache[b].ts || 0));
+      while (keys.length > X_VID_CACHE_MAX) {
+        delete xVidMemCache[keys.shift()];
+      }
+    }
+    try {
+      chrome.storage.local.set({ [X_VID_STORAGE_KEY]: xVidMemCache }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) { void e; }
+  }
+
+  function queryXVideoMeta(video) {
+    return new Promise((resolve) => {
+      if (!video.dataset.geminiXvToken) {
+        video.dataset.geminiXvToken = "xv_" + (++xVidTokenSeq);
+      }
+      const reqId = "xvq_" + (++xVidQuerySeq);
+      const timer = setTimeout(() => {
+        xVidPendingQueries.delete(reqId);
+        resolve(null);
+      }, 1500);
+      xVidPendingQueries.set(reqId, (info) => {
+        clearTimeout(timer);
+        resolve(info || null);
+      });
+      window.postMessage({
+        type: "GEMINI_X_VIDEO_QUERY",
+        reqId,
+        token: video.dataset.geminiXvToken
+      }, "*");
+    });
+  }
+
+  // MAIN dunyadaki x-inject.js ile köprü
+  if (isX) {
+    window.addEventListener("message", (event) => {
+      if (event.source !== window || !event.data) return;
+      if (event.data.type === "GEMINI_X_VIDEO_CAPTURED" && event.data.info && event.data.info.mediaId) {
+        xVidMetaByMediaId.set(event.data.info.mediaId, event.data.info);
+      } else if (event.data.type === "GEMINI_X_VIDEO_INFO" && event.data.reqId) {
+        const cb = xVidPendingQueries.get(event.data.reqId);
+        if (cb) {
+          xVidPendingQueries.delete(event.data.reqId);
+          cb(event.data.info);
+        }
+      }
+    });
+  }
+
+  function findXVideoHostContainer(video) {
+    const vc = video.closest('[data-testid="videoComponent"]');
+    if (vc) {
+      // overflow:hidden katmanina yakin tut ki tam ekran/kart koseleriyle hizalansin
+      let p = video.parentElement;
+      while (p && p !== vc) {
+        try {
+          const cs = window.getComputedStyle(p);
+          if (cs.position !== "static" && (cs.overflow === "hidden" || cs.overflowX === "hidden")) {
+            return p;
+          }
+        } catch (e) { void e; }
+        p = p.parentElement;
+      }
+      try {
+        if (window.getComputedStyle(vc).position === "static") vc.style.position = "relative";
+      } catch (e) { void e; }
+      return vc;
+    }
+    const parent = video.parentElement;
+    if (parent) {
+      try {
+        if (window.getComputedStyle(parent).position === "static") parent.style.position = "relative";
+      } catch (e) { void e; }
+    }
+    return parent;
+  }
+
+  function isEligibleXVideo(video) {
+    if (!video || video.tagName !== "VIDEO" || !video.isConnected) return false;
+    if (video.closest("#gemini-translator-root, [data-gemini-img-embed], [data-gemini-xv-embed]")) return false;
+    const poster = video.getAttribute("poster") || "";
+    const aria = (video.getAttribute("aria-label") || "").toLowerCase();
+    // Sessiz dongulu GIF'leri atla
+    if (/tweet_video_thumb\/|\.gif(?:\?|$)/i.test(poster) || /\bgif\b/.test(aria)) return false;
+    const inPlayer = !!video.closest('[data-testid="videoComponent"], [data-testid="videoPlayer"]');
+    if (!inPlayer) return false;
+    const r = video.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && (r.width < 150 || r.height < 110)) return false;
+    return true;
+  }
+
+  function updateXVideoSubtitleDisplay(video) {
+    const st = xVidStates.get(video);
+    if (!st || !st.subTextEl) return;
+    if (!st.shown || st.status !== "done" || !Array.isArray(st.cues) || st.cues.length === 0) {
+      st.subTextEl.textContent = "";
+      return;
+    }
+    const curMs = Math.round((video.currentTime || 0) * 1000);
+    // Arama veya playback icin uygun altyaziyi bul
+    let activeText = "";
+    for (let i = 0; i < st.cues.length; i++) {
+      const c = st.cues[i];
+      if (curMs >= c.startMs && curMs <= c.endMs) {
+        activeText = c.text;
+        break;
+      }
+      if (c.startMs > curMs) break;
+    }
+    if (st.subTextEl.textContent !== activeText) {
+      st.subTextEl.textContent = activeText;
+    }
+    // Yerli X VTT <track> altyazisinin ust uste binmesini engelle
+    try {
+      if (video.textTracks) {
+        for (let i = 0; i < video.textTracks.length; i++) {
+          if (video.textTracks[i].mode === "showing") {
+            video.textTracks[i].mode = "hidden";
+          }
+        }
+      }
+    } catch (e) { void e; }
+  }
+
+  function stopXVideoRafLoop(st) {
+    if (st.rafId) {
+      cancelAnimationFrame(st.rafId);
+      st.rafId = 0;
+    }
+  }
+
+  function startXVideoRafLoop(video) {
+    const st = xVidStates.get(video);
+    if (!st || st.rafId || video.paused || video.ended) return;
+    const tick = () => {
+      if (!video.isConnected || !xVidStates.has(video) || video.paused || video.ended || !st.shown) {
+        st.rafId = 0;
+        return;
+      }
+      updateXVideoSubtitleDisplay(video);
+      st.rafId = requestAnimationFrame(tick);
+    };
+    st.rafId = requestAnimationFrame(tick);
+  }
+
+  function renderXVideoControls(video) {
+    const st = xVidStates.get(video);
+    if (!st || !st.uiWrap) return;
+    const wrap = st.uiWrap;
+    wrap.innerHTML = "";
+
+    if (st.status === "idle") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "xv-pill";
+      btn.title = "Videonun altyazısını hedef dile çevir";
+      btn.innerHTML = XV_CC_ICON + "<span>Altyazıyı Çevir</span>";
+      ["pointerdown", "mousedown"].forEach((ev) => btn.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); }));
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        runXVideoSubtitleTranslation(video, false);
+      });
+      wrap.appendChild(btn);
+      return;
+    }
+
+    const bar = document.createElement("div");
+    bar.className = "xv-ctrl-bar" + (st.status === "error" ? " is-error" : "");
+    ["pointerdown", "mousedown"].forEach((ev) => bar.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); }));
+
+    if (st.status === "loading") {
+      bar.innerHTML = '<span class="xv-spinner"></span><span class="xv-status">' + (st.statusMsg || "Altyazı alınıyor...") + '</span>';
+      wrap.appendChild(bar);
+      return;
+    }
+
+    if (st.status === "empty" || st.status === "error") {
+      if (st.status === "error") {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "xv-ctrl-btn";
+        retry.title = st.error || "Tekrar dene";
+        retry.innerHTML = IMG_REFRESH_ICON + "<span>" + (st.shortErr || "Tekrar Dene") + "</span>";
+        retry.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          runXVideoSubtitleTranslation(video, true);
+        });
+        bar.appendChild(retry);
+      } else {
+        const msg = document.createElement("span");
+        msg.className = "xv-status";
+        msg.textContent = st.error || "Altyazı bulunamadı";
+        bar.appendChild(msg);
+      }
+      const rst = document.createElement("button");
+      rst.type = "button";
+      rst.className = "xv-ctrl-btn";
+      rst.title = "Kapat";
+      rst.innerHTML = IMG_CLOSE_ICON;
+      rst.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        st.status = "idle";
+        st.cues = [];
+        updateXVideoSubtitleDisplay(video);
+        renderXVideoControls(video);
+      });
+      bar.appendChild(rst);
+      wrap.appendChild(bar);
+      return;
+    }
+
+    // status === "done"
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "xv-ctrl-btn" + (st.shown ? " active" : "");
+    toggleBtn.title = st.shown ? "Altyazıyı gizle" : "Altyazıyı göster";
+    toggleBtn.innerHTML = st.shown ? IMG_EYE_ICON : IMG_EYEOFF_ICON;
+    toggleBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      st.shown = !st.shown;
+      updateXVideoSubtitleDisplay(video);
+      if (st.shown && !video.paused) startXVideoRafLoop(video);
+      else if (!st.shown) stopXVideoRafLoop(st);
+      renderXVideoControls(video);
+    });
+    bar.appendChild(toggleBtn);
+
+    const reBtn = document.createElement("button");
+    reBtn.type = "button";
+    reBtn.className = "xv-ctrl-btn";
+    reBtn.title = "Yeniden çevir";
+    reBtn.innerHTML = IMG_REFRESH_ICON;
+    reBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      runXVideoSubtitleTranslation(video, true);
+    });
+    bar.appendChild(reBtn);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "xv-ctrl-btn";
+    closeBtn.title = "Altyazıyı kaldır";
+    closeBtn.innerHTML = IMG_CLOSE_ICON;
+    closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      st.status = "idle";
+      st.cues = [];
+      st.shown = false;
+      stopXVideoRafLoop(st);
+      updateXVideoSubtitleDisplay(video);
+      renderXVideoControls(video);
+    });
+    bar.appendChild(closeBtn);
+    wrap.appendChild(bar);
+  }
+
+  function readDomTextTrackCues(video) {
+    const out = [];
+    try {
+      const tracks = video.textTracks;
+      if (!tracks) return out;
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        if (!t.cues || t.cues.length === 0) continue;
+        for (let j = 0; j < t.cues.length; j++) {
+          const c = t.cues[j];
+          const txt = cleanVttCueText(c.text || "");
+          if (!txt) continue;
+          out.push({
+            id: out.length,
+            startMs: Math.round((c.startTime || 0) * 1000),
+            endMs: Math.round((c.endTime || c.startTime + 2) * 1000),
+            text: txt
+          });
+        }
+        if (out.length > 0) break;
+      }
+    } catch (e) { void e; }
+    return out;
+  }
+
+  async function runXVideoSubtitleTranslation(video, forceRefresh) {
+    const st = xVidStates.get(video);
+    if (!st || st.status === "loading") return;
+
+    st.status = "loading";
+    st.statusMsg = "Video bilgisi alınıyor...";
+    renderXVideoControls(video);
+
+    try {
+      await loadXVideoCacheFromStorage();
+      let meta = await queryXVideoMeta(video);
+      if (!meta || (!meta.m3u8Url && !meta.mp4Url)) {
+        const pm = /\/(?:amplify_video_thumb|ext_tw_video_thumb)\/(\d+)\//.exec(video.getAttribute("poster") || "");
+        const cachedMeta = pm ? xVidMetaByMediaId.get(pm[1]) : null;
+        if (cachedMeta) meta = Object.assign({}, meta || {}, cachedMeta);
+      }
+
+      const videoKeyBase = (meta && (meta.mediaId || meta.tweetId)) || "";
+      const cacheKey = videoKeyBase ? (videoKeyBase + "|" + xTargetLang) : "";
+
+      if (!forceRefresh && cacheKey && xVidMemCache[cacheKey] && Array.isArray(xVidMemCache[cacheKey].cues) && xVidMemCache[cacheKey].cues.length > 0) {
+        st.cues = xVidMemCache[cacheKey].cues;
+        st.status = "done";
+        st.shown = true;
+        updateXVideoSubtitleDisplay(video);
+        if (!video.paused) startXVideoRafLoop(video);
+        renderXVideoControls(video);
+        return;
+      }
+
+      let rawCues = [];
+      let trackLang = (meta && meta.language) || "auto";
+
+      if (meta && meta.m3u8Url) {
+        st.statusMsg = "Altyazı akışı okunuyor...";
+        renderXVideoControls(video);
+        const vttRes = await new Promise((resolve, reject) => {
+          safeSendMessage({
+            action: "x-video-load-vtt",
+            m3u8Url: meta.m3u8Url,
+            preferredLang: trackLang
+          }, (res) => {
+            if (res && res.success) resolve(res);
+            else reject(new Error((res && res.error) || "Altyazı yüklenemedi."));
+          });
+        });
+        if (vttRes.activeTrack && vttRes.activeTrack.language) {
+          trackLang = vttRes.activeTrack.language;
+        }
+        if (Array.isArray(vttRes.vttTexts) && vttRes.vttTexts.length > 0) {
+          rawCues = parseAndMergeXWebVtt(vttRes.vttTexts);
+        }
+      }
+
+      // Yedek 1: sayfadaki textTracks
+      if (rawCues.length === 0) {
+        rawCues = readDomTextTrackCues(video);
+      }
+
+      // Yedek 2: Yerlesik VTT yoksa kucuk MP4 sesinden Gemini ile altyazi uret
+      if (rawCues.length === 0 && meta && meta.mp4Url) {
+        st.statusMsg = "Sesten altyazı üretiliyor...";
+        renderXVideoControls(video);
+        const fallbackCues = await new Promise((resolve, reject) => {
+          safeSendMessage({
+            action: "x-video-transcribe-translate",
+            mp4Url: meta.mp4Url,
+            targetLang: xTargetLang
+          }, (res) => {
+            if (res && res.success && Array.isArray(res.cues)) resolve(res.cues);
+            else reject(new Error((res && res.error) || "Bu videoda altyazı bulunamadı."));
+          });
+        });
+        st.cues = fallbackCues;
+        st.status = "done";
+        st.shown = true;
+        if (cacheKey) saveXVideoCacheEntry(cacheKey, st.cues, "ai-audio");
+        updateXVideoSubtitleDisplay(video);
+        if (!video.paused) startXVideoRafLoop(video);
+        renderXVideoControls(video);
+        return;
+      }
+
+      if (rawCues.length === 0) {
+        st.status = "empty";
+        st.error = "Bu videoda altyazı yok";
+        renderXVideoControls(video);
+        setTimeout(() => {
+          const cur = xVidStates.get(video);
+          if (cur && cur.status === "empty") {
+            cur.status = "idle";
+            renderXVideoControls(video);
+          }
+        }, 3200);
+        return;
+      }
+
+      // Zaten hedef dildeyse dogrudan goster
+      const srcBase = String(trackLang || "").split("-")[0].toLowerCase();
+      const tgtBase = String(xTargetLang || "tr").split("-")[0].toLowerCase();
+      if (srcBase && srcBase === tgtBase && !forceRefresh) {
+        st.cues = rawCues;
+        st.status = "done";
+        st.shown = true;
+        updateXVideoSubtitleDisplay(video);
+        if (!video.paused) startXVideoRafLoop(video);
+        renderXVideoControls(video);
+        return;
+      }
+
+      // Altyazi satirlarini 50'serlik parcalarla secili motora (Google / DeepL / Gemini) cevir
+      const CHUNK = 50;
+      const totalChunks = Math.ceil(rawCues.length / CHUNK);
+      const translatedCues = rawCues.map((c) => ({ ...c }));
+
+      for (let ci = 0; ci < totalChunks; ci++) {
+        if (!video.isConnected || !xVidStates.has(video)) return;
+        const start = ci * CHUNK;
+        const slice = rawCues.slice(start, start + CHUNK);
+        st.statusMsg = totalChunks > 1
+          ? `Çevriliyor (${ci + 1}/${totalChunks})...`
+          : `Altyazı çevriliyor (${rawCues.length} satır)...`;
+        renderXVideoControls(video);
+
+        const batchOut = await new Promise((resolve, reject) => {
+          safeSendMessage({
+            action: "translate-batch",
+            texts: slice.map((c) => c.text),
+            sourceLang: srcBase || "auto",
+            targetLang: xTargetLang
+          }, (res) => {
+            if (res && res.success && Array.isArray(res.translations)) resolve(res.translations);
+            else reject(new Error((res && res.error) || "Altyazı çevirisi başarısız."));
+          });
+        });
+
+        for (let k = 0; k < slice.length; k++) {
+          const tr = String(batchOut[k] ?? "").trim();
+          if (tr) translatedCues[start + k].text = tr;
+        }
+      }
+
+      st.cues = translatedCues;
+      st.status = "done";
+      st.shown = true;
+      if (cacheKey) saveXVideoCacheEntry(cacheKey, st.cues, trackLang);
+      updateXVideoSubtitleDisplay(video);
+      if (!video.paused) startXVideoRafLoop(video);
+      renderXVideoControls(video);
+    } catch (err) {
+      st.status = "error";
+      st.error = (err && err.message) || "Altyazı çevrilemedi.";
+      st.shortErr = /anahtar/i.test(st.error) ? "API Anahtarı Yok" : "Tekrar Dene";
+      renderXVideoControls(video);
+    }
+  }
+
+  function attachXVideoOverlay(video) {
+    if (!xVideoTranslateEnabled || !isEligibleXVideo(video)) return;
+    if (xVidStates.has(video)) {
+      const prevSt = xVidStates.get(video);
+      if (prevSt.host && prevSt.host.isConnected) return;
+      detachXVideoOverlay(video);
+    }
+
+    const container = findXVideoHostContainer(video);
+    if (!container) return;
+
+    const host = document.createElement("span");
+    host.setAttribute("data-gemini-xv-embed", "1");
+    host.setAttribute("data-theme", imgTheme);
+    const shadow = host.attachShadow({ mode: "open" });
+
+    const style = document.createElement("style");
+    style.textContent = X_VID_SHADOW_CSS;
+    shadow.appendChild(style);
+
+    const uiWrap = document.createElement("div");
+    const subWrap = document.createElement("div");
+    subWrap.className = "xv-sub-wrap";
+    const subTextEl = document.createElement("div");
+    subTextEl.className = "xv-sub-text";
+    subWrap.appendChild(subTextEl);
+    shadow.appendChild(uiWrap);
+    shadow.appendChild(subWrap);
+    container.appendChild(host);
+
+    const onTimeUpdate = () => updateXVideoSubtitleDisplay(video);
+    const onPlay = () => startXVideoRafLoop(video);
+    const onPause = () => {
+      const st = xVidStates.get(video);
+      if (st) stopXVideoRafLoop(st);
+      updateXVideoSubtitleDisplay(video);
+    };
+    const onEmptied = () => {
+      const curPoster = video.getAttribute("poster") || "";
+      const st = xVidStates.get(video);
+      if (st && st.posterUrl && curPoster && st.posterUrl !== curPoster) {
+        st.posterUrl = curPoster;
+        st.status = "idle";
+        st.cues = [];
+        st.shown = false;
+        stopXVideoRafLoop(st);
+        updateXVideoSubtitleDisplay(video);
+        renderXVideoControls(video);
+      }
+    };
+
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("seeked", onTimeUpdate);
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("ended", onPause);
+    video.addEventListener("emptied", onEmptied);
+
+    xVidStates.set(video, {
+      host,
+      shadow,
+      uiWrap,
+      subTextEl,
+      status: "idle",
+      cues: [],
+      shown: false,
+      rafId: 0,
+      posterUrl: video.getAttribute("poster") || "",
+      error: "",
+      listeners: { onTimeUpdate, onPlay, onPause, onEmptied }
+    });
+    xVidActiveVideos.add(video);
+    renderXVideoControls(video);
+  }
+
+  function detachXVideoOverlay(video) {
+    const st = xVidStates.get(video);
+    if (st) {
+      stopXVideoRafLoop(st);
+      if (st.listeners) {
+        video.removeEventListener("timeupdate", st.listeners.onTimeUpdate);
+        video.removeEventListener("seeked", st.listeners.onTimeUpdate);
+        video.removeEventListener("play", st.listeners.onPlay);
+        video.removeEventListener("pause", st.listeners.onPause);
+        video.removeEventListener("ended", st.listeners.onPause);
+        video.removeEventListener("emptied", st.listeners.onEmptied);
+      }
+      try { if (st.host) st.host.remove(); } catch (e) { void e; }
+      xVidStates.delete(video);
+    }
+    xVidActiveVideos.delete(video);
+  }
+
+  function scanXVideos() {
+    if (!isX || !xVideoTranslateEnabled) return;
+    xVidActiveVideos.forEach((v) => {
+      if (!v.isConnected) detachXVideoOverlay(v);
+    });
+    document.querySelectorAll("video").forEach((v) => {
+      attachXVideoOverlay(v);
+    });
+  }
+
+  function initXVideoSubtitles() {
+    if (!isX || !xVideoTranslateEnabled) return;
+    loadXVideoCacheFromStorage();
+    scanXVideos();
+    if (!xVidMutationObserver && document.body) {
+      xVidMutationObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const n of m.addedNodes) {
+            if (n.nodeType !== 1) continue;
+            if (n.tagName === "VIDEO" || n.querySelector?.("video")) {
+              if (!xVidScanTimer) {
+                xVidScanTimer = setTimeout(() => {
+                  xVidScanTimer = null;
+                  scanXVideos();
+                }, 120);
+              }
+              return;
+            }
+          }
+        }
+      });
+      xVidMutationObserver.observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
+  function stopXVideoSubtitles() {
+    if (xVidMutationObserver) {
+      xVidMutationObserver.disconnect();
+      xVidMutationObserver = null;
+    }
+    if (xVidScanTimer) {
+      clearTimeout(xVidScanTimer);
+      xVidScanTimer = null;
+    }
+    Array.from(xVidActiveVideos).forEach((v) => detachXVideoOverlay(v));
+    document.querySelectorAll("[data-gemini-xv-embed]").forEach((el) => el.remove());
+  }
 
 })();
