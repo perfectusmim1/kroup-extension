@@ -9,6 +9,24 @@ let targetLanguage = 'tr';
 let preferredSourceLanguage = 'auto';
 let isOverlayHiddenByUser = false;
 let translationEngine = 'gemini';
+let ytTranslationEnginePref = 'inherit';
+let separateTranslationEngine = false;
+let translationProvider = 'google';
+let deeplApiKey = '';
+function ytResolveEffectiveEngine() {
+  if (ytTranslationEnginePref === 'gemini' || ytTranslationEnginePref === 'google' || ytTranslationEnginePref === 'deepl') {
+    return ytTranslationEnginePref;
+  }
+  if (separateTranslationEngine && (translationProvider === 'google' || translationProvider === 'deepl')) {
+    return translationProvider;
+  }
+  return 'gemini';
+}
+function ytEngineDisplayName(eng) {
+  if (eng === 'google') return 'Google Translate';
+  if (eng === 'deepl') return 'DeepL';
+  return 'Gemini AI';
+}
 let geminiApiKey = '';
 let useMultiKeys = false;
 let geminiApiKeys = '';
@@ -527,7 +545,11 @@ function loadSettings(callback) {
     'translationParts',
     'autoTranslate',
     'autoSaveTranslation',
-    'ytCommentsEnabled'
+    'ytCommentsEnabled',
+    'ytTranslationEngine',
+    'separateTranslationEngine',
+    'translationProvider',
+    'deeplApiKey'
   ], (result) => {
     if (!chrome.runtime || !chrome.runtime.id) return;
 
@@ -535,7 +557,11 @@ function loadSettings(callback) {
     targetLanguage = result.targetLanguage || 'tr';
     preferredSourceLanguage = result.preferredSourceLanguage || 'auto';
     isOverlayHiddenByUser = result.isOverlayHiddenByUser === true;
-    translationEngine = 'gemini';
+    ytTranslationEnginePref = result.ytTranslationEngine || 'inherit';
+    separateTranslationEngine = result.separateTranslationEngine === true;
+    translationProvider = (result.translationProvider === 'deepl' || result.translationProvider === 'google') ? result.translationProvider : 'google';
+    deeplApiKey = String(result.deeplApiKey || '').trim();
+    translationEngine = ytResolveEffectiveEngine();
     // API anahtarı her zaman genel Ayarlar'dan gelir (tekli + çoklu mod dahil).
     geminiApiKey = result.apiKey || YT_FALLBACK_API_KEY;
     useMultiKeys = result.useMultiKeys === true;
@@ -620,6 +646,14 @@ chrome.storage.onChanged.addListener((changes) => {
     chrome.storage.local.get(['geminiThinkingLevel'], (r) => {
       geminiThinkingLevel = (r && r.geminiThinkingLevel) || (changes.thinkingLevel.newValue || geminiThinkingLevel);
     });
+  }
+  if (changes.ytTranslationEngine || changes.separateTranslationEngine || changes.translationProvider || changes.deeplApiKey) {
+    if (changes.ytTranslationEngine) ytTranslationEnginePref = changes.ytTranslationEngine.newValue || 'inherit';
+    if (changes.separateTranslationEngine) separateTranslationEngine = changes.separateTranslationEngine.newValue === true;
+    if (changes.translationProvider) translationProvider = changes.translationProvider.newValue || 'google';
+    if (changes.deeplApiKey) deeplApiKey = String(changes.deeplApiKey.newValue || '').trim();
+    translationEngine = ytResolveEffectiveEngine();
+    updatePanelUI();
   }
   if (changes.ytCommentsEnabled) {
     ytCommentsEnabled = changes.ytCommentsEnabled.newValue !== false;
@@ -941,7 +975,7 @@ function updatePanelUI() {
 
   // Method Text
   if (engineInfoText) {
-    engineInfoText.textContent = 'Gemini AI';
+    engineInfoText.textContent = ytEngineDisplayName(ytResolveEffectiveEngine());
   }
 
   // Gemini action display
@@ -1871,6 +1905,14 @@ async function ytRunSubtitleLoad(skipCache) {
         return;
       }
 
+      const effEngine = ytResolveEffectiveEngine();
+      translationEngine = effEngine;
+      updatePanelUI();
+      if (effEngine === 'google' || effEngine === 'deepl') {
+        await translateWithExternalEngine(loadToken, effEngine);
+        return;
+      }
+
       const hasApiKey = (useMultiKeys && geminiApiKeys && geminiApiKeys.trim() !== '') || (!useMultiKeys && geminiApiKey && geminiApiKey.trim() !== '');
       if (hasApiKey) {
         await translateWithGemini(loadToken);
@@ -2049,6 +2091,114 @@ async function ytRepairUntranslatedLines(loadToken, entries, modelName, keysToTr
         if (e._wasMissing) e.translatedText = '';
       });
     }
+  }
+}
+
+// 8a. External Subtitle Translator (Google Translate Free / DeepL API via background.js)
+function ytIsPureActionCaption(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (/^(?:\[[^\]]{1,40}\]|\([^)]{1,40}\)|♪+[\s♪]*)$/u.test(t)) return true;
+  return false;
+}
+
+function ytSendBatchToBackground(texts, sourceLang, targetLang, engine) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({
+        action: 'translate-batch',
+        texts,
+        sourceLang: sourceLang || 'auto',
+        targetLang: targetLang || 'tr',
+        engineOverride: engine
+      }, (res) => {
+        const err = chrome.runtime && chrome.runtime.lastError;
+        if (err) { reject(new Error(err.message)); return; }
+        if (res && res.success && Array.isArray(res.translations)) resolve(res.translations);
+        else reject(new Error((res && res.error) || 'Çeviri başarısız oldu.'));
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function translateWithExternalEngine(loadToken, engine) {
+  showError(null);
+  const label = ytEngineDisplayName(engine);
+  if (engine === 'deepl' && !deeplApiKey) {
+    showProgress(false);
+    setPanelStatus('DeepL API anahtarı eksik');
+    showError("DeepL ile çevirmek için Ayarlar sekmesinden DeepL API anahtarınızı girin.");
+    return;
+  }
+
+  const CHUNK_SIZE = engine === 'deepl' ? 45 : 60;
+  const total = rawSubtitles.length;
+  const results = [];
+  const srcLang = (activeTrack && activeTrack.languageCode) ? activeTrack.languageCode.split('-')[0] : 'auto';
+  const totalChunks = Math.max(1, Math.ceil(total / CHUNK_SIZE));
+
+  updateProgress(0);
+  setPanelStatus(`${label} ile çevriliyor (0/${totalChunks})...`);
+  showProgress(true, `${label} ile çevriliyor...`);
+
+  for (let c = 0; c < totalChunks; c++) {
+    if (loadToken !== subtitleLoadToken) return;
+    const slice = rawSubtitles.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+    const toSendIdx = [];
+    const toSendTexts = [];
+    const translatedSlice = new Array(slice.length).fill('');
+
+    for (let i = 0; i < slice.length; i++) {
+      const txt = String(slice[i].text || '').trim();
+      if (!txt || (filterExtraExplanations && ytIsPureActionCaption(txt))) {
+        translatedSlice[i] = '';
+      } else {
+        toSendIdx.push(i);
+        toSendTexts.push(txt);
+      }
+    }
+
+    if (toSendTexts.length > 0) {
+      try {
+        const out = await ytSendBatchToBackground(toSendTexts, srcLang, targetLanguage, engine);
+        if (loadToken !== subtitleLoadToken) return;
+        for (let k = 0; k < toSendIdx.length; k++) {
+          translatedSlice[toSendIdx[k]] = String(out[k] ?? '').trim();
+        }
+      } catch (err) {
+        if (loadToken !== subtitleLoadToken) return;
+        showError(`${label} çeviri hatası (Parça ${c + 1}/${totalChunks}): ${err.message}`);
+        showProgress(false);
+        setPanelStatus(`${label} çeviri hatası`);
+        return;
+      }
+    }
+
+    for (let i = 0; i < slice.length; i++) {
+      results.push({
+        ...slice[i],
+        translatedText: translatedSlice[i]
+      });
+    }
+
+    translatedSubtitles = [...results].sort((a, b) => a.start - b.start || a.id - b.id);
+    currentSubtitleIndex = -1;
+    isCachedTranslation = false;
+    updateNativeCaptionVisibility();
+    onVideoTimeUpdate();
+    const pct = Math.floor(((c + 1) / totalChunks) * 100);
+    updateProgress(pct);
+    setPanelStatus(`${label}: Parça ${c + 1}/${totalChunks} (${translatedSubtitles.length} satır)`);
+  }
+
+  if (loadToken !== subtitleLoadToken) return;
+  showProgress(false);
+  setPanelStatus(`Hazır: ${translatedSubtitles.length} satır (${label})`);
+
+  if (autoSaveTranslation && currentVideoId && activeTrack) {
+    saveCachedTranslation(currentVideoId, targetLanguage, activeTrack.languageCode, translatedSubtitles, getVideoTitle());
   }
 }
 

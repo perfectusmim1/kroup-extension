@@ -241,8 +241,12 @@ function setupContextMenus() {
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.visualMenuEnabled) setupContextMenus();
   if (changes.soundMutedHosts) mixerMutedHosts = changes.soundMutedHosts.newValue || {};
-  // Model/anahtar degisince bellek onbellegindeki eski sonuclar gecersiz kalir
-  if (changes.apiKey || changes.modelName || changes.thinkingLevel || changes.useMultiKeys || changes.geminiApiKeys) {
+  // Model/anahtar/ceviri motoru degisince bellek onbellegindeki eski sonuclar gecersiz kalir
+  if (
+    changes.apiKey || changes.modelName || changes.thinkingLevel ||
+    changes.useMultiKeys || changes.geminiApiKeys ||
+    changes.separateTranslationEngine || changes.translationProvider || changes.deeplApiKey
+  ) {
     GEM_MEM_CACHE.clear();
     IMG_TRANS_CACHE.clear();
   }
@@ -357,8 +361,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true; // Keep the message channel open for async response
   } else if (message.action === "translate-batch") {
-    gemCached("tb:" + message.targetLang + ":" + gemHash(JSON.stringify(message.texts)),
-      () => handleBatchTranslation(message.texts, message.targetLang))
+    const engineKey = message.engineOverride || "auto";
+    const srcKey = message.sourceLang || "auto";
+    gemCached("tb:" + engineKey + ":" + srcKey + ":" + message.targetLang + ":" + gemHash(JSON.stringify(message.texts)),
+      () => handleBatchTranslation(message.texts, message.targetLang, message.sourceLang || "auto", message.engineOverride || ""))
       .then(results => sendResponse({ success: true, translations: results }))
       .catch(error => sendResponse({ success: false, error: error.message }));
 
@@ -602,19 +608,267 @@ async function postGeminiBody(url, body) {
   return response.json();
 }
 
+// ==========================================
+// HARİCİ ÇEVİRİ MOTORLARI (Google Translate Ücretsiz & DeepL API)
+// ==========================================
+function loadTranslationEngineSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      ["apiKey", "modelName", "thinkingLevel", "useMultiKeys", "geminiApiKeys", "separateTranslationEngine", "translationProvider", "deeplApiKey"],
+      (result) => {
+        resolve({
+          apiKey: result.apiKey || DEFAULT_API_KEY,
+          modelName: normalizeModelName(result.modelName),
+          thinkingLevel: result.thinkingLevel || "MINIMAL",
+          useMultiKeys: result.useMultiKeys !== undefined ? !!result.useMultiKeys : DEFAULT_USE_MULTI_KEYS,
+          geminiApiKeys: result.geminiApiKeys || DEFAULT_GEMINI_API_KEYS,
+          separateTranslationEngine: !!result.separateTranslationEngine,
+          translationProvider: (result.translationProvider === "deepl" || result.translationProvider === "google") ? result.translationProvider : "google",
+          deeplApiKey: String(result.deeplApiKey || "").trim()
+        });
+      }
+    );
+  });
+}
+
+function resolveEffectiveTranslationProvider(settings, engineOverride) {
+  const ov = String(engineOverride || "").toLowerCase();
+  if (ov === "gemini" || ov === "google" || ov === "deepl") return ov;
+  if (settings.separateTranslationEngine) {
+    if (settings.translationProvider === "google" || settings.translationProvider === "deepl") {
+      return settings.translationProvider;
+    }
+  }
+  return "gemini";
+}
+
+function mapGoogleLangCode(code) {
+  const c = String(code || "auto").trim();
+  if (!c || c === "auto") return "auto";
+  if (c === "zh") return "zh-CN";
+  if (c === "zh-TW" || c === "zh-Hant") return "zh-TW";
+  if (c === "jw") return "jv";
+  return c;
+}
+
+async function googleTranslateSingleRaw(text, sourceLang, targetLang) {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return raw;
+  const sl = mapGoogleLangCode(sourceLang || "auto");
+  const tl = mapGoogleLangCode(targetLang || "tr");
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t`;
+  const body = new URLSearchParams({ q: raw }).toString();
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body
+  });
+  if (!res.ok) {
+    throw new Error(`Google Translate hatası (HTTP ${res.status}).`);
+  }
+  const data = await res.json();
+  if (!Array.isArray(data) || !Array.isArray(data[0])) {
+    throw new Error("Google Translate geçersiz yanıt döndürdü.");
+  }
+  return data[0].map((seg) => (Array.isArray(seg) && typeof seg[0] === "string" ? seg[0] : "")).join("");
+}
+
+async function translateWithGoogleFree(text, sourceLang, targetLang) {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return raw;
+  const MAX_CHUNK = 4200;
+  if (raw.length <= MAX_CHUNK) {
+    return googleTranslateSingleRaw(raw, sourceLang, targetLang);
+  }
+  // Uzun metni paragraf/satır sınırlarından bölerek çevir
+  const parts = raw.split(/(\n+)/);
+  const chunks = [];
+  let cur = "";
+  for (const p of parts) {
+    if (cur.length + p.length > MAX_CHUNK && cur) {
+      chunks.push(cur);
+      cur = p;
+    } else {
+      cur += p;
+    }
+  }
+  if (cur) chunks.push(cur);
+  const out = [];
+  for (const ch of chunks) {
+    out.push(await googleTranslateSingleRaw(ch, sourceLang, targetLang));
+  }
+  return out.join("");
+}
+
+async function translateBatchWithGoogleFree(texts, sourceLang, targetLang) {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+  const results = new Array(texts.length).fill("");
+
+  // Küçük dizilerde doğrudan eşzamanlı tekli çağrı (%100 sıfır indeks kayması)
+  if (texts.length <= 8) {
+    const CONC = 4;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CONC, texts.length) }, async () => {
+      while (cursor < texts.length) {
+        const idx = cursor++;
+        const item = String(texts[idx] ?? "");
+        results[idx] = item.trim() ? await translateWithGoogleFree(item, sourceLang, targetLang) : item;
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+
+  // Büyük dizilerde (YouTube altyazı, sayfa çevirisi) sayısal belirteçli paketleme + kayıp olursa tekli onarım
+  const MAX_CHARS = 3600;
+  const MAX_ITEMS = 28;
+  const batches = [];
+  let curBatch = [];
+  let curChars = 0;
+  for (let i = 0; i < texts.length; i++) {
+    const t = String(texts[i] ?? "");
+    if (!t.trim()) {
+      results[i] = t;
+      continue;
+    }
+    if (curBatch.length > 0 && (curBatch.length >= MAX_ITEMS || curChars + t.length + 14 > MAX_CHARS)) {
+      batches.push(curBatch);
+      curBatch = [];
+      curChars = 0;
+    }
+    curBatch.push({ idx: i, text: t });
+    curChars += t.length + 14;
+  }
+  if (curBatch.length > 0) batches.push(curBatch);
+
+  const CONC = 3;
+  let bCursor = 0;
+  const runBatch = async (batch) => {
+    const payload = batch.map((item, k) => `[${9000 + k}] ${item.text.replace(/\r?\n/g, " ")}`).join("\n");
+    const translated = await googleTranslateSingleRaw(payload, sourceLang, targetLang);
+    const parsedMap = new Map();
+    const re = /\[\s*(9\d{3})\s*\]([\s\S]*?)(?=\[\s*9\d{3}\s*\]|$)/g;
+    let m;
+    while ((m = re.exec(translated)) !== null) {
+      const k = parseInt(m[1], 10) - 9000;
+      if (k >= 0 && k < batch.length) {
+        parsedMap.set(k, m[2].trim());
+      }
+    }
+    const missing = [];
+    for (let k = 0; k < batch.length; k++) {
+      if (parsedMap.has(k) && parsedMap.get(k) !== "") {
+        results[batch[k].idx] = parsedMap.get(k);
+      } else {
+        missing.push(batch[k]);
+      }
+    }
+    for (const miss of missing) {
+      results[miss.idx] = await translateWithGoogleFree(miss.text, sourceLang, targetLang);
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(CONC, batches.length) }, async () => {
+    while (bCursor < batches.length) {
+      const b = batches[bCursor++];
+      await runBatch(b);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const DEEPL_TARGET_MAP = {
+  tr: "TR", en: "EN-US", de: "DE", fr: "FR", es: "ES", it: "IT",
+  pt: "PT-PT", ru: "RU", ar: "AR", zh: "ZH-HANS", "zh-TW": "ZH-HANT",
+  ja: "JA", ko: "KO", id: "ID", nl: "NL", pl: "PL", sv: "SV",
+  no: "NB", da: "DA", fi: "FI", el: "EL", hu: "HU", cs: "CS",
+  sk: "SK", sl: "SL", bg: "BG", ro: "RO", uk: "UK", et: "ET",
+  lv: "LV", lt: "LT", he: "HE", th: "TH", vi: "VI"
+};
+
+const DEEPL_SOURCE_MAP = {
+  tr: "TR", en: "EN", de: "DE", fr: "FR", es: "ES", it: "IT",
+  pt: "PT", ru: "RU", ar: "AR", zh: "ZH", "zh-TW": "ZH",
+  ja: "JA", ko: "KO", id: "ID", nl: "NL", pl: "PL", sv: "SV",
+  no: "NB", da: "DA", fi: "FI", el: "EL", hu: "HU", cs: "CS",
+  sk: "SK", sl: "SL", bg: "BG", ro: "RO", uk: "UK", et: "ET",
+  lv: "LV", lt: "LT", he: "HE", th: "TH", vi: "VI"
+};
+
+function getDeepLEndpoint(apiKey) {
+  return String(apiKey || "").trim().endsWith(":fx")
+    ? "https://api-free.deepl.com/v2/translate"
+    : "https://api.deepl.com/v2/translate";
+}
+
+async function translateBatchWithDeepL(texts, sourceLang, targetLang, apiKey) {
+  const key = String(apiKey || "").trim();
+  if (!key) {
+    throw new Error("Lütfen Ayarlar'dan geçerli bir DeepL API anahtarı tanımlayın.");
+  }
+  const targetCode = DEEPL_TARGET_MAP[targetLang] || String(targetLang || "TR").toUpperCase();
+  const srcClean = sourceLang && sourceLang !== "auto" ? (DEEPL_SOURCE_MAP[sourceLang] || String(sourceLang).split("-")[0].toUpperCase()) : "";
+  const endpoint = getDeepLEndpoint(key);
+
+  const results = new Array(texts.length).fill("");
+  const nonEmpty = [];
+  for (let i = 0; i < texts.length; i++) {
+    const t = String(texts[i] ?? "");
+    if (!t.trim()) results[i] = t;
+    else nonEmpty.push({ idx: i, text: t });
+  }
+  if (nonEmpty.length === 0) return results;
+
+  const CHUNK_MAX = 45;
+  for (let s = 0; s < nonEmpty.length; s += CHUNK_MAX) {
+    const slice = nonEmpty.slice(s, s + CHUNK_MAX);
+    const bodyObj = {
+      text: slice.map((x) => x.text),
+      target_lang: targetCode
+    };
+    if (srcClean) bodyObj.source_lang = srcClean;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `DeepL-Auth-Key ${key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(bodyObj)
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      const msg = errJson.message || `HTTP ${res.status}`;
+      if (res.status === 403) throw new Error("DeepL API anahtarı geçersiz veya yetkisiz.");
+      if (res.status === 456) throw new Error("DeepL API karakter kotası doldu.");
+      if (res.status === 429) throw new Error("DeepL API istek limiti aşıldı, biraz bekleyin.");
+      throw new Error(`DeepL hatası: ${msg}`);
+    }
+    const data = await res.json();
+    const arr = Array.isArray(data?.translations) ? data.translations : [];
+    for (let k = 0; k < slice.length; k++) {
+      results[slice[k].idx] = (arr[k] && typeof arr[k].text === "string") ? arr[k].text : slice[k].text;
+    }
+  }
+  return results;
+}
+
+async function translateWithDeepL(text, sourceLang, targetLang, apiKey) {
+  const arr = await translateBatchWithDeepL([text], sourceLang, targetLang, apiKey);
+  return arr[0] ?? "";
+}
+
 async function handleTranslation(text, sourceLang, targetLang) {
   // Load settings from local storage
-  const settings = await new Promise((resolve) => {
-    chrome.storage.local.get(["apiKey", "modelName", "thinkingLevel", "useMultiKeys", "geminiApiKeys"], (result) => {
-      resolve({
-        apiKey: result.apiKey || DEFAULT_API_KEY,
-        modelName: normalizeModelName(result.modelName),
-        thinkingLevel: result.thinkingLevel || "MINIMAL",
-        useMultiKeys: result.useMultiKeys !== undefined ? !!result.useMultiKeys : DEFAULT_USE_MULTI_KEYS,
-        geminiApiKeys: result.geminiApiKeys || DEFAULT_GEMINI_API_KEYS
-      });
-    });
-  });
+  const settings = await loadTranslationEngineSettings();
+  const provider = resolveEffectiveTranslationProvider(settings, "");
+  if (provider === "google") {
+    return translateWithGoogleFree(text, sourceLang, targetLang);
+  }
+  if (provider === "deepl") {
+    return translateWithDeepL(text, sourceLang, targetLang, settings.deeplApiKey);
+  }
 
   const modelName = settings.modelName;
 
@@ -1021,19 +1275,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   mixerTellOffscreen({ action: "mixer-release", tabId }).catch(() => {});
 });
 
-async function handleBatchTranslation(texts, targetLang) {
+async function handleBatchTranslation(texts, targetLang, sourceLang = "auto", engineOverride = "") {
   // Load settings
-  const settings = await new Promise((resolve) => {
-    chrome.storage.local.get(["apiKey", "modelName", "thinkingLevel", "useMultiKeys", "geminiApiKeys"], (result) => {
-      resolve({
-        apiKey: result.apiKey || DEFAULT_API_KEY,
-        modelName: normalizeModelName(result.modelName),
-        thinkingLevel: result.thinkingLevel || "MINIMAL",
-        useMultiKeys: result.useMultiKeys !== undefined ? !!result.useMultiKeys : DEFAULT_USE_MULTI_KEYS,
-        geminiApiKeys: result.geminiApiKeys || DEFAULT_GEMINI_API_KEYS
-      });
-    });
-  });
+  const settings = await loadTranslationEngineSettings();
+  const provider = resolveEffectiveTranslationProvider(settings, engineOverride);
+  if (provider === "google") {
+    return translateBatchWithGoogleFree(texts, sourceLang, targetLang);
+  }
+  if (provider === "deepl") {
+    return translateBatchWithDeepL(texts, sourceLang, targetLang, settings.deeplApiKey);
+  }
 
   const modelName = settings.modelName;
 
@@ -1168,17 +1419,14 @@ function imgTranslateTellOffscreen(msg) {
 
 async function handleImageBubblesTranslation(texts, targetLang) {
   if (!Array.isArray(texts) || texts.length === 0) return [];
-  const settings = await new Promise((resolve) => {
-    chrome.storage.local.get(["apiKey", "modelName", "thinkingLevel", "useMultiKeys", "geminiApiKeys"], (result) => {
-      resolve({
-        apiKey: result.apiKey || DEFAULT_API_KEY,
-        modelName: normalizeModelName(result.modelName),
-        thinkingLevel: result.thinkingLevel || "MINIMAL",
-        useMultiKeys: result.useMultiKeys !== undefined ? !!result.useMultiKeys : DEFAULT_USE_MULTI_KEYS,
-        geminiApiKeys: result.geminiApiKeys || DEFAULT_GEMINI_API_KEYS
-      });
-    });
-  });
+  const settings = await loadTranslationEngineSettings();
+  const provider = resolveEffectiveTranslationProvider(settings, "");
+  if (provider === "google") {
+    return translateBatchWithGoogleFree(texts, "auto", targetLang);
+  }
+  if (provider === "deepl") {
+    return translateBatchWithDeepL(texts, "auto", targetLang, settings.deeplApiKey);
+  }
 
   const apiKeys = settings.useMultiKeys
     ? settings.geminiApiKeys.split("\n").map((k) => k.trim()).filter((k) => k !== "")

@@ -346,8 +346,11 @@ function ensurePanelInit(tabId) {
 // STORAGE UTILITIES
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["apiKey", "modelName", "modelMode", "popupTheme", "selectionTranslationEnabled", "selectionSearchEnabled", "visualMenuEnabled", "imageTranslateBtnPos", "imageTranslateTargetLang", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "thinkingLevel", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "useMultiKeys", "geminiApiKeys", "transSource", "transTarget"], (result) => {
+    chrome.storage.local.get(["apiKey", "modelName", "modelMode", "popupTheme", "selectionTranslationEnabled", "selectionSearchEnabled", "visualMenuEnabled", "imageTranslateBtnPos", "imageTranslateTargetLang", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "thinkingLevel", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "useMultiKeys", "geminiApiKeys", "transSource", "transTarget", "separateTranslationEngine", "translationProvider", "deeplApiKey"], (result) => {
       resolve({
+        separateTranslationEngine: !!result.separateTranslationEngine,
+        translationProvider: (result.translationProvider === "deepl" || result.translationProvider === "google") ? result.translationProvider : "google",
+        deeplApiKey: String(result.deeplApiKey || ""),
         apiKey: result.apiKey || DEFAULT_API_KEY,
         modelName: normalizeModelName(result.modelName),
         modelMode: result.modelMode || "",
@@ -855,7 +858,19 @@ function setupFeatureActions() {
 - Sadece çeviri sonucunu döndür. Ek bilgi, açıklama, başlık veya not ekleme.`;
 
     try {
-      const result = await callGeminiAPI(input, systemPrompt);
+      const curSettings = await getSettings();
+      let result;
+      if (curSettings.separateTranslationEngine && (curSettings.translationProvider === "google" || curSettings.translationProvider === "deepl")) {
+        result = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ action: "translate", text: input, sourceLang: src, targetLang: target }, (res) => {
+            if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+            if (res && res.success) resolve(res.translation);
+            else reject(new Error((res && res.error) || "Çeviri başarısız oldu."));
+          });
+        });
+      } else {
+        result = await callGeminiAPI(input, systemPrompt);
+      }
       document.getElementById("translator-output").textContent = result;
     } catch (err) {
       displayError("translator-output", err.message);
@@ -944,6 +959,45 @@ function initSettingsUI(settings) {
     imgTargetLangInput.value = settings.imageTranslateTargetLang || "tr";
     updateCustomSelectUI("settings-img-target-lang");
   }
+
+  // Çeviri Motoru (İşi İkiye Böl: Google Translate / DeepL vs Gemini AI)
+  const sepTransChk = document.getElementById("settings-separate-translate");
+  const transEngGroup = document.getElementById("settings-trans-engine-group");
+  const transProvInput = document.getElementById("settings-translation-provider");
+  const deeplKeyGroup = document.getElementById("settings-deepl-key-group");
+  const deeplKeyInput = document.getElementById("settings-deepl-api-key");
+  const syncTransEngineVisibility = () => {
+    const isSep = !!(sepTransChk && sepTransChk.checked);
+    if (transEngGroup) transEngGroup.hidden = !isSep;
+    const prov = transProvInput ? transProvInput.value : "google";
+    if (deeplKeyGroup) deeplKeyGroup.hidden = !(isSep && prov === "deepl");
+  };
+  if (sepTransChk) {
+    sepTransChk.checked = !!settings.separateTranslationEngine;
+    if (!sepTransChk.dataset.wired) {
+      sepTransChk.dataset.wired = "1";
+      sepTransChk.addEventListener("change", syncTransEngineVisibility);
+    }
+  }
+  if (transProvInput) {
+    transProvInput.value = settings.translationProvider || "google";
+    updateCustomSelectUI("settings-translation-provider");
+    if (!transProvInput.dataset.wired) {
+      transProvInput.dataset.wired = "1";
+      transProvInput.addEventListener("change", syncTransEngineVisibility);
+    }
+  }
+  if (deeplKeyInput) {
+    deeplKeyInput.value = settings.deeplApiKey || "";
+  }
+  const toggleDeeplBtn = document.getElementById("toggle-deepl-key-vis");
+  if (toggleDeeplBtn && deeplKeyInput && !toggleDeeplBtn.dataset.wired) {
+    toggleDeeplBtn.dataset.wired = "1";
+    toggleDeeplBtn.addEventListener("click", () => {
+      deeplKeyInput.type = deeplKeyInput.type === "password" ? "text" : "password";
+    });
+  }
+  syncTransEngineVisibility();
 
   document.getElementById("settings-selection-translate").checked = settings.selectionTranslationEnabled;
   document.getElementById("settings-selection-search").checked = settings.selectionSearchEnabled;
@@ -1158,6 +1212,9 @@ function setupSettingsActions() {
     const thinkingLevel = document.getElementById("settings-thinking-level").value;
     const imageTranslateBtnPos = document.getElementById("settings-img-btn-pos")?.value || "right";
     const imageTranslateTargetLang = document.getElementById("settings-img-target-lang")?.value || "tr";
+    const separateTranslationEngine = !!document.getElementById("settings-separate-translate")?.checked;
+    const translationProvider = document.getElementById("settings-translation-provider")?.value || "google";
+    const deeplApiKey = (document.getElementById("settings-deepl-api-key")?.value || "").trim();
     const selectionTranslationEnabled = document.getElementById("settings-selection-translate").checked;
     const selectionSearchEnabled = document.getElementById("settings-selection-search").checked;
     const visualMenuEnabled = document.getElementById("settings-visual-menu").checked;
@@ -1178,16 +1235,23 @@ function setupSettingsActions() {
       return;
     }
 
-    if (useMultiKeys) {
-      const keysList = geminiApiKeys.split("\n").map(k => k.trim()).filter(k => k !== "");
-      if (keysList.length === 0) {
-        alert("Lütfen en az bir adet API anahtarı giriniz.");
-        return;
-      }
-    } else {
-      if (!key) {
-        alert("Lütfen API anahtarı alanını boş bırakmayınız.");
-        return;
+    if (separateTranslationEngine && translationProvider === "deepl" && !deeplApiKey) {
+      alert("DeepL seçiliyken lütfen DeepL API anahtarını giriniz.");
+      return;
+    }
+
+    if (!separateTranslationEngine) {
+      if (useMultiKeys) {
+        const keysList = geminiApiKeys.split("\n").map(k => k.trim()).filter(k => k !== "");
+        if (keysList.length === 0) {
+          alert("Lütfen en az bir adet API anahtarı giriniz.");
+          return;
+        }
+      } else {
+        if (!key) {
+          alert("Lütfen API anahtarı alanını boş bırakmayınız.");
+          return;
+        }
       }
     }
 
@@ -1198,6 +1262,9 @@ function setupSettingsActions() {
       popupTheme: theme,
       imageTranslateBtnPos,
       imageTranslateTargetLang,
+      separateTranslationEngine,
+      translationProvider,
+      deeplApiKey,
       selectionTranslationEnabled,
       selectionSearchEnabled,
       visualMenuEnabled,
@@ -1243,6 +1310,16 @@ function setupSettingsActions() {
     if (imgPosRst) { imgPosRst.value = "right"; updateCustomSelectUI("settings-img-btn-pos"); }
     const imgLangRst = document.getElementById("settings-img-target-lang");
     if (imgLangRst) { imgLangRst.value = "tr"; updateCustomSelectUI("settings-img-target-lang"); }
+    const sepRst = document.getElementById("settings-separate-translate");
+    if (sepRst) sepRst.checked = false;
+    const provRst = document.getElementById("settings-translation-provider");
+    if (provRst) { provRst.value = "google"; updateCustomSelectUI("settings-translation-provider"); }
+    const deeplRst = document.getElementById("settings-deepl-api-key");
+    if (deeplRst) deeplRst.value = "";
+    const transGrpRst = document.getElementById("settings-trans-engine-group");
+    if (transGrpRst) transGrpRst.hidden = true;
+    const deeplGrpRst = document.getElementById("settings-deepl-key-group");
+    if (deeplGrpRst) deeplGrpRst.hidden = true;
     document.getElementById("settings-theme").value = "light";
     updateCustomSelectUI("settings-theme");
     applyTheme("light");
@@ -1291,6 +1368,9 @@ function setupSettingsActions() {
       popupTheme: "light",
       imageTranslateBtnPos: "right",
       imageTranslateTargetLang: "tr",
+      separateTranslationEngine: false,
+      translationProvider: "google",
+      deeplApiKey: "",
       selectionTranslationEnabled: true,
       selectionSearchEnabled: true,
       visualMenuEnabled: false,
@@ -1350,6 +1430,9 @@ function setupSettingsActions() {
         thinkingLevel: document.getElementById("settings-thinking-level").value,
         imageTranslateBtnPos: document.getElementById("settings-img-btn-pos")?.value || "right",
         imageTranslateTargetLang: document.getElementById("settings-img-target-lang")?.value || "tr",
+        separateTranslationEngine: !!document.getElementById("settings-separate-translate")?.checked,
+        translationProvider: document.getElementById("settings-translation-provider")?.value || "google",
+        deeplApiKey: (document.getElementById("settings-deepl-api-key")?.value || "").trim(),
         selectionTranslationEnabled: document.getElementById("settings-selection-translate").checked,
         selectionSearchEnabled: document.getElementById("settings-selection-search").checked,
         visualMenuEnabled: document.getElementById("settings-visual-menu").checked,
@@ -1696,7 +1779,7 @@ function getYTSettings() {
   return new Promise((resolve) => {
     chrome.storage.local.get([
       "enabled", "targetLanguage", "preferredSourceLanguage",
-      "geminiModel", "ytModelMode", "geminiThinkingLevel",
+      "geminiModel", "ytModelMode", "geminiThinkingLevel", "ytTranslationEngine", "separateTranslationEngine", "translationProvider",
       "fontSize", "styleShadow", "styleBox", "styleOutline",
       "subtitleBgOpacity", "subtitleBgColor", "subtitleFontColor", "subtitleFontWeight",
       "filterExtraExplanations", "translationParts",
@@ -1709,6 +1792,9 @@ function getYTSettings() {
         geminiModel: normalizeModelName(r.geminiModel),
         ytModelMode: r.ytModelMode || "",
         geminiThinkingLevel: r.geminiThinkingLevel || "MEDIUM",
+        ytTranslationEngine: r.ytTranslationEngine || "inherit",
+        separateTranslationEngine: !!r.separateTranslationEngine,
+        translationProvider: (r.translationProvider === "deepl" || r.translationProvider === "google") ? r.translationProvider : "google",
         fontSize: r.fontSize || 24,
         styleShadow: r.styleShadow !== false,
         styleBox: r.styleBox === true,
@@ -1807,6 +1893,7 @@ function ytCaptureSnapshot() {
       enabled: document.getElementById("yt-enabled")?.checked,
       targetLanguage: document.getElementById("yt-target-lang")?.value,
       preferredSourceLanguage: document.getElementById("yt-preferred-source")?.value,
+      ytTranslationEngine: document.getElementById("yt-translation-engine")?.value || "inherit",
       geminiModel: document.getElementById("yt-gemini-model")?.value,
       ytCustomModel: (document.getElementById("yt-custom-model")?.value || "").trim(),
       geminiThinkingLevel: document.getElementById("yt-thinking-level")?.value,
@@ -1847,6 +1934,23 @@ function ytApplySettingsToUI(s) {
   updateCustomSelectUI("yt-target-lang");
   document.getElementById("yt-preferred-source").value = s.preferredSourceLanguage;
   updateCustomSelectUI("yt-preferred-source");
+
+  const ytEngInp = document.getElementById("yt-translation-engine");
+  const ytGemOnlyGrp = document.getElementById("yt-gemini-only-group");
+  const syncYtEngineVisibility = () => {
+    const val = ytEngInp ? ytEngInp.value : "inherit";
+    const eff = (val === "inherit") ? (s.separateTranslationEngine ? s.translationProvider : "gemini") : val;
+    if (ytGemOnlyGrp) ytGemOnlyGrp.hidden = eff !== "gemini";
+  };
+  if (ytEngInp) {
+    ytEngInp.value = s.ytTranslationEngine || "inherit";
+    updateCustomSelectUI("yt-translation-engine");
+    if (!ytEngInp.dataset.wired) {
+      ytEngInp.dataset.wired = "1";
+      ytEngInp.addEventListener("change", syncYtEngineVisibility);
+    }
+  }
+  syncYtEngineVisibility();
 
   const ytModelInp = document.getElementById("yt-gemini-model");
   const ytCustomGrp = document.getElementById("yt-custom-model-group");
@@ -2204,6 +2308,7 @@ function setupYouTubePanel() {
       enabled: document.getElementById("yt-enabled").checked,
       targetLanguage: document.getElementById("yt-target-lang").value || "tr",
       preferredSourceLanguage: document.getElementById("yt-preferred-source").value || "auto",
+      ytTranslationEngine: document.getElementById("yt-translation-engine")?.value || "inherit",
       ytModelMode: document.getElementById("yt-gemini-model").value === "__custom__" ? "custom" : "preset",
       geminiModel: document.getElementById("yt-gemini-model").value === "__custom__"
         ? normalizeModelName(document.getElementById("yt-custom-model")?.value)

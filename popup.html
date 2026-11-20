@@ -459,73 +459,90 @@
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
-                <span>Gemini Ayarları (YouTube)</span>
+                <span>Çeviri Motoru & Model (YouTube)</span>
               </div>
 
               <div class="settings-group">
-                <p class="input-helper">API anahtarı olarak genel <b>Ayarlar</b> sekmesinde girili anahtar kullanılır. Aşağıdan sadece model ve düşünme seviyesini seçebilirsin.</p>
-              </div>
-
-              <div class="settings-group" style="margin-top: 14px;">
-                <label class="settings-label">Gemini Modeli</label>
-                <div class="custom-select" data-id="yt-gemini-model">
+                <label class="settings-label">Altyazı Çeviri Motoru</label>
+                <div class="custom-select" data-id="yt-translation-engine">
                   <button type="button" class="custom-select-trigger">
-                    <span>gemini-4-hydrogen</span>
+                    <span>Genel Çeviri Ayarını Kullan</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
                   </button>
                   <div class="custom-select-options">
-                    <div class="custom-option active" data-value="gemini-4-hydrogen">gemini-4-hydrogen</div>
-                    <div class="custom-option" data-value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</div>
-                    <div class="custom-option" data-value="__custom__">Manuel Model Yaz...</div>
+                    <div class="custom-option active" data-value="inherit">Genel Çeviri Ayarını Kullan</div>
+                    <div class="custom-option" data-value="gemini">Gemini AI</div>
+                    <div class="custom-option" data-value="google">Google Translate (Ücretsiz)</div>
+                    <div class="custom-option" data-value="deepl">DeepL (API Anahtarı)</div>
                   </div>
-                  <input type="hidden" id="yt-gemini-model" value="gemini-4-hydrogen">
-                </div>
-                <div id="yt-custom-model-group" hidden style="margin-top: 6px;">
-                  <input type="text" id="yt-custom-model" class="text-input textarea-mono" placeholder="örn. gemini-4-argon, gemini-3.8-flash">
+                  <input type="hidden" id="yt-translation-engine" value="inherit">
                 </div>
               </div>
 
-              <div class="settings-group" style="margin-top: 14px;">
-                <label class="settings-label">Düşünme Seviyesi</label>
-                <div class="custom-select" data-id="yt-thinking-level">
-                  <button type="button" class="custom-select-trigger">
-                    <span>Orta (Balanced)</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                  </button>
-                  <div class="custom-select-options">
-                    <div class="custom-option" data-value="NONE">Yok (None)</div>
-                    <div class="custom-option" data-value="MINIMAL">Minimal (En Hızlı)</div>
-                    <div class="custom-option" data-value="LOW">Düşük (Low)</div>
-                    <div class="custom-option active" data-value="MEDIUM">Orta (Medium)</div>
-                    <div class="custom-option" data-value="HIGH">Yüksek (High)</div>
-                    <div class="custom-option" data-value="XHIGH">Ekstra Yüksek (XHigh)</div>
+              <div id="yt-gemini-only-group">
+                <div class="settings-group" style="margin-top: 14px;">
+                  <label class="settings-label">Gemini Modeli</label>
+                  <div class="custom-select" data-id="yt-gemini-model">
+                    <button type="button" class="custom-select-trigger">
+                      <span>gemini-4-hydrogen</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options">
+                      <div class="custom-option active" data-value="gemini-4-hydrogen">gemini-4-hydrogen</div>
+                      <div class="custom-option" data-value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</div>
+                      <div class="custom-option" data-value="__custom__">Manuel Model Yaz...</div>
+                    </div>
+                    <input type="hidden" id="yt-gemini-model" value="gemini-4-hydrogen">
                   </div>
-                  <input type="hidden" id="yt-thinking-level" value="MEDIUM">
+                  <div id="yt-custom-model-group" hidden style="margin-top: 6px;">
+                    <input type="text" id="yt-custom-model" class="text-input textarea-mono" placeholder="örn. gemini-4-argon, gemini-3.8-flash">
+                  </div>
                 </div>
-              </div>
 
-              <div class="settings-group" style="margin-top: 14px;">
-                <label class="settings-label">Çeviri Parçası</label>
-                <div class="custom-select" data-id="yt-trans-parts">
-                  <button type="button" class="custom-select-trigger">
-                    <span>3 Parça</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                  </button>
-                  <div class="custom-select-options">
-                    <div class="custom-option" data-value="1">1 Parça</div>
-                    <div class="custom-option" data-value="2">2 Parça</div>
-                    <div class="custom-option active" data-value="3">3 Parça</div>
-                    <div class="custom-option" data-value="4">4 Parça</div>
-                    <div class="custom-option" data-value="5">5 Parça</div>
-                    <div class="custom-option" data-value="6">6 Parça</div>
+                <div class="settings-group" style="margin-top: 14px;">
+                  <label class="settings-label">Düşünme Seviyesi</label>
+                  <div class="custom-select" data-id="yt-thinking-level">
+                    <button type="button" class="custom-select-trigger">
+                      <span>Orta (Balanced)</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options">
+                      <div class="custom-option" data-value="NONE">Yok (None)</div>
+                      <div class="custom-option" data-value="MINIMAL">Minimal (En Hızlı)</div>
+                      <div class="custom-option" data-value="LOW">Düşük (Low)</div>
+                      <div class="custom-option active" data-value="MEDIUM">Orta (Medium)</div>
+                      <div class="custom-option" data-value="HIGH">Yüksek (High)</div>
+                      <div class="custom-option" data-value="XHIGH">Ekstra Yüksek (XHigh)</div>
+                    </div>
+                    <input type="hidden" id="yt-thinking-level" value="MEDIUM">
                   </div>
-                  <input type="hidden" id="yt-trans-parts" value="3">
+                </div>
+
+                <div class="settings-group" style="margin-top: 14px;">
+                  <label class="settings-label">Çeviri Parçası</label>
+                  <div class="custom-select" data-id="yt-trans-parts">
+                    <button type="button" class="custom-select-trigger">
+                      <span>3 Parça</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options">
+                      <div class="custom-option" data-value="1">1 Parça</div>
+                      <div class="custom-option" data-value="2">2 Parça</div>
+                      <div class="custom-option active" data-value="3">3 Parça</div>
+                      <div class="custom-option" data-value="4">4 Parça</div>
+                      <div class="custom-option" data-value="5">5 Parça</div>
+                      <div class="custom-option" data-value="6">6 Parça</div>
+                    </div>
+                    <input type="hidden" id="yt-trans-parts" value="3">
+                  </div>
                 </div>
               </div>
 
@@ -1075,6 +1092,63 @@
                   <input type="hidden" id="settings-thinking-level" value="MINIMAL">
                 </div>
                 <p class="input-helper">Yapay zeka modelinin düşünme/akıl yürütme seviyesi (<code>gemini-4-hydrogen</code> ile <code>XHigh</code> desteklenir).</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="2" y1="12" x2="22" y2="12"></line>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+                <span>Çeviri Motoru (İşi İkiye Böl)</span>
+              </div>
+
+              <div class="toggle-list">
+                <div class="toggle-row">
+                  <div>
+                    <div class="toggle-title">Çeviri için ayrı motor kullan</div>
+                    <div class="toggle-desc">Açıkken çeviriler (metin, sayfa, X, görsel, YouTube) seçili çeviri motorunu; yazım düzeltme, özet ve akıllı yanıt Gemini AI modelini kullanır.</div>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settings-separate-translate">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div id="settings-trans-engine-group" hidden style="margin-top: 12px;">
+                <div class="settings-group">
+                  <label class="settings-label">Çeviri Sağlayıcısı</label>
+                  <div class="custom-select" data-id="settings-translation-provider">
+                    <button type="button" class="custom-select-trigger">
+                      <span>Google Translate (Ücretsiz)</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options">
+                      <div class="custom-option active" data-value="google">Google Translate (Ücretsiz)</div>
+                      <div class="custom-option" data-value="deepl">DeepL (API Anahtarı)</div>
+                    </div>
+                    <input type="hidden" id="settings-translation-provider" value="google">
+                  </div>
+                </div>
+
+                <div class="settings-group" id="settings-deepl-key-group" hidden style="margin-top: 12px;">
+                  <label for="settings-deepl-api-key" class="settings-label">DeepL API Anahtarı</label>
+                  <div class="input-with-icon">
+                    <input type="password" id="settings-deepl-api-key" class="text-input textarea-mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx">
+                    <button class="btn-toggle-password" id="toggle-deepl-key-vis" type="button" title="Göster/Gizle">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="eye-icon">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                  </div>
+                  <p class="input-helper" style="margin-top: 6px;">Ücretsiz (<code>:fx</code>) ve Pro DeepL anahtarları otomatik algılanır.</p>
+                </div>
               </div>
             </div>
 
