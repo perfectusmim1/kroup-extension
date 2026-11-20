@@ -4333,21 +4333,14 @@
   }
 
   // ==========================================
-  // TOONPARROT GÖRSEL ÇEVİRİ (Yerinde OCR + Inpaint + Vektör Dizgi)
-  // Sağ tık menüsü + görsel üstü yüzen buton (sağ / sol / gizli)
+  // TOONPARROT GÖRSEL ÇEVİRİ (Gömülü Katman + Blueprint Kutu Sığdırma)
+  // Sağ tık menüsü + görselin kendi kapsayıcısına gömülü buton (sağ / sol / gizli)
   // ==========================================
-  let imgHost = null;
-  let imgShadow = null;
-  let imgHoverBtn = null;
-  let imgOverlaysLayer = null;
-  let imgControlsLayer = null;
-  let hoveredImg = null;
   let lastContextImg = null;
   let imgTheme = "light";
-  let imgFontsLoaded = false;
-  let imgSyncRaf = 0;
-  let imgHoverHideTimer = null;
-  const imgStates = new Map(); // HTMLImageElement -> { status, blocks, shown, overlayEl, ctrlEl, toastEl, toastTimer, targetLang, error }
+  let hoverState = null; // { img, container, anchor, ro }
+  let hoverHideTimer = null;
+  const imgStates = new Map(); // HTMLImageElement -> { status, blocks, shown, container, anchor, shadow, overlayEl, ctrlEl, ro, toastTimer, targetLang, error }
 
   const IMG_TRANSLATE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
   const IMG_EYE_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -4355,204 +4348,169 @@
   const IMG_REFRESH_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
   const IMG_CLOSE_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
-  function ensureScanlationPageFonts() {
-    if (imgFontsLoaded || document.getElementById("gemini-scanlation-fonts")) {
-      imgFontsLoaded = true;
-      return;
+  const EMBED_SHADOW_CSS = `
+    :host {
+      --pill-bg: rgba(18, 22, 26, 0.82);
+      --pill-border: rgba(255, 255, 255, 0.16);
+      --pill-text: #f8fafc;
+      --pill-accent: #14b8a6;
+      --pill-hover: rgba(18, 22, 26, 0.95);
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
     }
-    imgFontsLoaded = true;
-    try {
-      const link = document.createElement("link");
-      link.id = "gemini-scanlation-fonts";
-      link.rel = "stylesheet";
-      link.href = "https://fonts.googleapis.com/css2?family=Anton&family=Bangers&family=Cinzel:wght@700;800&family=Pangolin&family=Patrick+Hand&family=Permanent+Marker&family=Shantell+Sans:ital,wght@0,500;0,600;0,700;1,500;1,600;1,700&display=swap&subset=latin,latin-ext";
-      (document.head || document.documentElement).appendChild(link);
-    } catch (e) { void e; }
-  }
+    :host([data-theme="fresh"]) {
+      --pill-bg: rgba(15, 36, 34, 0.85);
+      --pill-border: rgba(20, 184, 166, 0.42);
+      --pill-accent: #2dd4bf;
+      --pill-hover: rgba(13, 148, 136, 0.95);
+    }
+    * { box-sizing: border-box; }
+    .img-overlay-wrap {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      user-select: none;
+      overflow: hidden;
+      container-type: inline-size;
+    }
+    .img-patch {
+      position: absolute;
+      display: block;
+      max-width: none;
+      pointer-events: none;
+      user-select: none;
+    }
+    .img-text-block {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      pointer-events: none;
+      user-select: none;
+    }
+    .img-text-block.single-stat {
+      align-items: flex-start;
+    }
+    .img-text-line {
+      display: block;
+      width: 100%;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .img-text-block.single-stat .img-text-line {
+      text-align: left;
+    }
+    .img-hover-btn,
+    .img-ctrl-bar {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 29px;
+      border-radius: 999px;
+      border: 1px solid var(--pill-border);
+      background: var(--pill-bg);
+      color: var(--pill-text);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      pointer-events: auto;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+      z-index: 3;
+      transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease, transform 140ms ease;
+    }
+    :host(.pos-left) .img-hover-btn,
+    :host(.pos-left) .img-ctrl-bar {
+      left: 10px;
+      right: auto;
+    }
+    .img-hover-btn {
+      padding: 0 11px;
+      cursor: pointer;
+    }
+    .img-hover-btn:hover {
+      background: var(--pill-hover);
+      border-color: var(--pill-accent);
+    }
+    .img-hover-btn:active { transform: scale(0.95); }
+    .img-hover-btn svg { color: var(--pill-accent); flex-shrink: 0; }
+    .img-ctrl-bar {
+      padding: 0 5px;
+      gap: 3px;
+    }
+    .img-ctrl-bar.is-error {
+      border-color: rgba(248, 113, 113, 0.55);
+      color: #fecaca;
+    }
+    .img-ctrl-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-width: 23px;
+      height: 23px;
+      padding: 0 5px;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: inherit;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 130ms ease, color 130ms ease;
+    }
+    .img-ctrl-btn:hover { background: rgba(255, 255, 255, 0.14); }
+    .img-ctrl-btn.active { color: var(--pill-accent); }
+    .img-spinner {
+      width: 13px;
+      height: 13px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: var(--pill-accent);
+      border-radius: 50%;
+      animation: imgSpin 650ms linear infinite;
+      flex-shrink: 0;
+      margin-left: 4px;
+    }
+    .img-status-text {
+      padding: 0 6px 0 3px;
+      white-space: nowrap;
+      max-width: 210px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @keyframes imgSpin { to { transform: rotate(360deg); } }
+  `;
 
-  function ensureImgTranslateHost() {
-    if (imgHost && imgHost.isConnected) return;
-    imgHost = document.createElement("div");
-    imgHost.id = "gemini-img-trans-host";
-    imgHost.setAttribute("data-theme", imgTheme);
-    imgHost.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483640;overflow:hidden;";
-    imgShadow = imgHost.attachShadow({ mode: "open" });
-
-    const style = document.createElement("style");
-    style.textContent = `
-      :host {
-        --pill-bg: rgba(18, 22, 26, 0.84);
-        --pill-border: rgba(255, 255, 255, 0.16);
-        --pill-text: #f8fafc;
-        --pill-accent: #14b8a6;
-        --pill-hover: rgba(18, 22, 26, 0.96);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      }
-      :host([data-theme="fresh"]) {
-        --pill-bg: rgba(15, 36, 34, 0.86);
-        --pill-border: rgba(20, 184, 166, 0.42);
-        --pill-accent: #2dd4bf;
-        --pill-hover: rgba(13, 148, 136, 0.96);
-      }
-      * { box-sizing: border-box; }
-      .img-overlay-wrap {
-        position: fixed;
-        pointer-events: none;
-        user-select: none;
-        overflow: hidden;
-        container-type: inline-size;
-      }
-      .img-patch {
-        position: absolute;
-        display: block;
-        max-width: none;
-        pointer-events: none;
-        user-select: none;
-      }
-      .img-text-block {
-        position: absolute;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        pointer-events: none;
-        user-select: none;
-      }
-      .img-text-block.single-stat {
-        align-items: flex-start;
-      }
-      .img-text-line {
-        display: block;
-        width: 100%;
-        white-space: nowrap;
-        text-align: center;
-      }
-      .img-text-block.single-stat .img-text-line {
-        text-align: left;
-      }
-      .img-hover-btn {
-        position: fixed;
-        display: none;
-        align-items: center;
-        gap: 6px;
-        height: 30px;
-        padding: 0 11px;
-        border-radius: 999px;
-        border: 1px solid var(--pill-border);
-        background: var(--pill-bg);
-        color: var(--pill-text);
-        font-size: 11.5px;
-        font-weight: 600;
-        letter-spacing: 0.1px;
-        cursor: pointer;
-        pointer-events: auto;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-        transition: background 150ms ease, border-color 150ms ease, transform 150ms ease, opacity 140ms ease;
-        z-index: 3;
-      }
-      .img-hover-btn:hover {
-        background: var(--pill-hover);
-        border-color: var(--pill-accent);
-        transform: translateY(-1px);
-      }
-      .img-hover-btn:active { transform: scale(0.95); }
-      .img-hover-btn svg { color: var(--pill-accent); flex-shrink: 0; }
-      .img-ctrl-bar {
-        position: fixed;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        height: 30px;
-        padding: 0 6px;
-        border-radius: 999px;
-        border: 1px solid var(--pill-border);
-        background: var(--pill-bg);
-        color: var(--pill-text);
-        font-size: 11.5px;
-        font-weight: 600;
-        pointer-events: auto;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-        z-index: 4;
-      }
-      .img-ctrl-bar.is-error {
-        border-color: rgba(248, 113, 113, 0.55);
-        color: #fecaca;
-      }
-      .img-ctrl-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 4px;
-        min-width: 24px;
-        height: 24px;
-        padding: 0 5px;
-        border: none;
-        border-radius: 999px;
-        background: transparent;
-        color: inherit;
-        font-family: inherit;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 130ms ease, color 130ms ease;
-      }
-      .img-ctrl-btn:hover { background: rgba(255, 255, 255, 0.14); }
-      .img-ctrl-btn.active { color: var(--pill-accent); }
-      .img-spinner {
-        width: 13px;
-        height: 13px;
-        border: 2px solid rgba(255, 255, 255, 0.25);
-        border-top-color: var(--pill-accent);
-        border-radius: 50%;
-        animation: imgSpin 650ms linear infinite;
-        flex-shrink: 0;
-      }
-      .img-status-text {
-        padding: 0 5px;
-        white-space: nowrap;
-        max-width: 220px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      @keyframes imgSpin { to { transform: rotate(360deg); } }
-    `;
-    imgShadow.appendChild(style);
-
-    imgOverlaysLayer = document.createElement("div");
-    imgControlsLayer = document.createElement("div");
-    imgHoverBtn = document.createElement("button");
-    imgHoverBtn.type = "button";
-    imgHoverBtn.className = "img-hover-btn";
-    imgHoverBtn.innerHTML = `${IMG_TRANSLATE_ICON}<span>Görseli Çevir</span>`;
-    imgHoverBtn.addEventListener("mouseenter", () => {
-      if (imgHoverHideTimer) { clearTimeout(imgHoverHideTimer); imgHoverHideTimer = null; }
+  function swallowInteractive(el) {
+    ["pointerdown", "mousedown"].forEach((evt) => {
+      el.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
     });
-    imgHoverBtn.addEventListener("mouseleave", () => {
-      scheduleHideHoverBtn();
-    });
-    imgHoverBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const target = hoveredImg;
-      hideHoverBtn();
-      if (target && target.isConnected) {
-        translateImageElement(target, imageTranslateTargetLang, false);
-      }
-    });
-
-    imgShadow.appendChild(imgOverlaysLayer);
-    imgShadow.appendChild(imgControlsLayer);
-    imgShadow.appendChild(imgHoverBtn);
-    (document.documentElement || document.body).appendChild(imgHost);
   }
 
   function syncImageTranslateTheme(theme) {
     imgTheme = theme || "light";
-    if (imgHost) imgHost.setAttribute("data-theme", imgTheme);
+    if (hoverState && hoverState.anchor) hoverState.anchor.setAttribute("data-theme", imgTheme);
+    for (const st of imgStates.values()) {
+      if (st.anchor) st.anchor.setAttribute("data-theme", imgTheme);
+    }
+  }
+
+  function refreshImageTranslatePositions() {
+    const isLeft = imageTranslateBtnPos === "left";
+    if (imageTranslateBtnPos === "hidden") removeHoverAnchor();
+    else if (hoverState && hoverState.anchor) hoverState.anchor.classList.toggle("pos-left", isLeft);
+    for (const st of imgStates.values()) {
+      if (st.anchor) st.anchor.classList.toggle("pos-left", isLeft);
+    }
   }
 
   // object-fit: contain kullanan lightbox/galeri görsellerinde gerçek resim alanını hesapla
@@ -4579,9 +4537,85 @@
     return { left, top, width, height, right: left + width, bottom: top + height };
   }
 
+  function findImageEmbedContainer(img) {
+    let el = img.parentElement;
+    let hops = 0;
+    while (el && el !== document.body && el !== document.documentElement && hops < 3) {
+      const tag = el.tagName;
+      if (tag === "PICTURE") {
+        el = el.parentElement;
+        hops++;
+        continue;
+      }
+      try {
+        const cs = window.getComputedStyle(el);
+        if (cs.display === "inline") {
+          el = el.parentElement;
+          hops++;
+          continue;
+        }
+      } catch (e) { void e; }
+      break;
+    }
+    if (!el || el === document.documentElement) el = img.parentElement || document.body;
+    try {
+      const cs = window.getComputedStyle(el);
+      if (cs.position === "static") {
+        el.style.position = "relative";
+      }
+    } catch (e) { void e; }
+    return el;
+  }
+
+  function syncEmbeddedAnchorBounds(img, container, anchor) {
+    if (!img.isConnected || !container.isConnected || !anchor.isConnected) return;
+    const box = getRenderedImageBox(img);
+    if (!box || box.width < 16 || box.height < 16) {
+      anchor.style.display = "none";
+      return;
+    }
+    const cr = container.getBoundingClientRect();
+    let bl = 0, bt = 0;
+    try {
+      const cs = window.getComputedStyle(container);
+      bl = parseFloat(cs.borderLeftWidth) || 0;
+      bt = parseFloat(cs.borderTopWidth) || 0;
+    } catch (e) { void e; }
+    const relLeft = Math.round((box.left - cr.left - bl) * 10) / 10;
+    const relTop = Math.round((box.top - cr.top - bt) * 10) / 10;
+    anchor.style.display = "block";
+    anchor.style.left = relLeft + "px";
+    anchor.style.top = relTop + "px";
+    anchor.style.width = (Math.round(box.width * 10) / 10) + "px";
+    anchor.style.height = (Math.round(box.height * 10) / 10) + "px";
+  }
+
+  function createEmbeddedAnchor(img) {
+    const container = findImageEmbedContainer(img);
+    const anchor = document.createElement("span");
+    anchor.setAttribute("data-gemini-img-embed", "1");
+    anchor.setAttribute("data-theme", imgTheme);
+    if (imageTranslateBtnPos === "left") anchor.classList.add("pos-left");
+    anchor.style.cssText = "position:absolute;display:block;pointer-events:none;z-index:2;overflow:hidden;margin:0;padding:0;border:0;";
+    const shadow = anchor.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = EMBED_SHADOW_CSS;
+    shadow.appendChild(style);
+    container.appendChild(anchor);
+    syncEmbeddedAnchorBounds(img, container, anchor);
+
+    let ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => syncEmbeddedAnchorBounds(img, container, anchor));
+      ro.observe(img);
+      if (container !== document.body) ro.observe(container);
+    }
+    return { container, anchor, shadow, ro };
+  }
+
   function isEligibleImage(img) {
     if (!img || img.tagName !== "IMG" || !img.isConnected) return false;
-    if (img.closest("#gemini-translator-root, #gemini-img-trans-host")) return false;
+    if (img.closest("#gemini-translator-root, [data-gemini-img-embed]")) return false;
     const src = img.currentSrc || img.src || "";
     if (!src || src.startsWith("data:image/svg")) return false;
     const r = img.getBoundingClientRect();
@@ -4601,99 +4635,58 @@
     return null;
   }
 
-  function placeCornerPill(el, box, posMode) {
-    const pad = 10;
-    const pillW = el.offsetWidth || 110;
-    const top = Math.max(8, Math.min(window.innerHeight - 38, box.top + pad));
-    let left;
-    if (posMode === "left") {
-      left = Math.max(8, Math.min(window.innerWidth - pillW - 8, box.left + pad));
-    } else {
-      left = Math.max(8, Math.min(window.innerWidth - pillW - 8, box.right - pillW - pad));
-    }
-    el.style.top = `${Math.round(top)}px`;
-    el.style.left = `${Math.round(left)}px`;
+  function removeHoverAnchor() {
+    if (hoverHideTimer) { clearTimeout(hoverHideTimer); hoverHideTimer = null; }
+    if (!hoverState) return;
+    try { if (hoverState.ro) hoverState.ro.disconnect(); } catch (e) { void e; }
+    try { hoverState.anchor.remove(); } catch (e) { void e; }
+    hoverState = null;
   }
 
-  function hideHoverBtn() {
-    if (imgHoverHideTimer) { clearTimeout(imgHoverHideTimer); imgHoverHideTimer = null; }
-    hoveredImg = null;
-    if (imgHoverBtn) imgHoverBtn.style.display = "none";
-  }
-
-  function scheduleHideHoverBtn() {
-    if (imgHoverHideTimer) clearTimeout(imgHoverHideTimer);
-    imgHoverHideTimer = setTimeout(() => {
-      hideHoverBtn();
+  function scheduleHideHoverAnchor() {
+    if (hoverHideTimer) clearTimeout(hoverHideTimer);
+    hoverHideTimer = setTimeout(() => {
+      removeHoverAnchor();
     }, 180);
   }
 
-  function syncAllImageOverlays() {
-    imgSyncRaf = 0;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    if (hoveredImg && imgHoverBtn && imgHoverBtn.style.display !== "none") {
-      if (imageTranslateBtnPos === "hidden" || !hoveredImg.isConnected || imgStates.has(hoveredImg)) {
-        hideHoverBtn();
-      } else {
-        const box = getRenderedImageBox(hoveredImg);
-        if (!box || box.bottom < 0 || box.top > vh || box.right < 0 || box.left > vw) {
-          hideHoverBtn();
-        } else {
-          placeCornerPill(imgHoverBtn, box, imageTranslateBtnPos);
-        }
-      }
+  function showHoverAnchorForImage(img) {
+    if (hoverHideTimer) { clearTimeout(hoverHideTimer); hoverHideTimer = null; }
+    if (hoverState && hoverState.img === img) {
+      syncEmbeddedAnchorBounds(img, hoverState.container, hoverState.anchor);
+      return;
     }
-
-    for (const [img, st] of imgStates.entries()) {
-      if (!img.isConnected) {
-        removeImageState(img);
-        continue;
+    removeHoverAnchor();
+    const { container, anchor, shadow, ro } = createEmbeddedAnchor(img);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "img-hover-btn";
+    btn.innerHTML = IMG_TRANSLATE_ICON + "<span>Görseli Çevir</span>";
+    swallowInteractive(btn);
+    btn.addEventListener("mouseenter", () => {
+      if (hoverHideTimer) { clearTimeout(hoverHideTimer); hoverHideTimer = null; }
+    });
+    btn.addEventListener("mouseleave", () => {
+      scheduleHideHoverAnchor();
+    });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      removeHoverAnchor();
+      if (img.isConnected) {
+        translateImageElement(img, imageTranslateTargetLang, false);
       }
-      const box = getRenderedImageBox(img);
-      const visible = box && box.width > 16 && box.height > 16 &&
-        box.bottom > 0 && box.top < vh && box.right > 0 && box.left < vw;
-
-      if (st.overlayEl) {
-        if (!visible || !st.shown) {
-          st.overlayEl.style.display = "none";
-        } else {
-          st.overlayEl.style.display = "block";
-          st.overlayEl.style.left = `${box.left}px`;
-          st.overlayEl.style.top = `${box.top}px`;
-          st.overlayEl.style.width = `${box.width}px`;
-          st.overlayEl.style.height = `${box.height}px`;
-        }
-      }
-      if (st.ctrlEl) {
-        if (!visible) {
-          st.ctrlEl.style.display = "none";
-        } else {
-          st.ctrlEl.style.display = "inline-flex";
-          const corner = imageTranslateBtnPos === "left" ? "left" : "right";
-          placeCornerPill(st.ctrlEl, box, corner);
-        }
-      }
-    }
-  }
-
-  function scheduleImgSync() {
-    if (imgSyncRaf) return;
-    imgSyncRaf = requestAnimationFrame(syncAllImageOverlays);
-  }
-
-  function refreshImageTranslatePositions() {
-    if (imageTranslateBtnPos === "hidden") hideHoverBtn();
-    scheduleImgSync();
+    });
+    shadow.appendChild(btn);
+    hoverState = { img, container, anchor, ro };
   }
 
   function removeImageState(img) {
     const st = imgStates.get(img);
     if (!st) return;
     if (st.toastTimer) clearTimeout(st.toastTimer);
-    if (st.overlayEl) st.overlayEl.remove();
-    if (st.ctrlEl) st.ctrlEl.remove();
+    try { if (st.ro) st.ro.disconnect(); } catch (e) { void e; }
+    try { if (st.anchor) st.anchor.remove(); } catch (e) { void e; }
     imgStates.delete(img);
   }
 
@@ -4708,39 +4701,39 @@
       patch.src = block.patchDataUrl;
       patch.alt = "";
       patch.draggable = false;
-      patch.style.top = `${pYmin / 10}%`;
-      patch.style.left = `${pXmin / 10}%`;
-      patch.style.width = `${(pXmax - pXmin) / 10}%`;
-      patch.style.height = `${(pYmax - pYmin) / 10}%`;
+      patch.style.top = (pYmin / 10) + "%";
+      patch.style.left = (pXmin / 10) + "%";
+      patch.style.width = ((pXmax - pXmin) / 10) + "%";
+      patch.style.height = ((pYmax - pYmin) / 10) + "%";
       overlayEl.appendChild(patch);
     }
 
-    // 2. Katman: Vektör scanlation dizgisi
+    // 2. Katman: Blueprint kutu-sığdırmalı vektör metinler
     for (const block of blocks) {
       const displayText = block.displayText || block.text || "";
       if (!displayText) continue;
       const [ymin, xmin, ymax, xmax] = block.box;
       const textColor = block.textColor || (block.isDark ? "#fafafa" : "#0c0c0c");
-      const fontSizeCqw = block.fontSizeCqw ?? 2.85;
-      const fontFamilyCss = block.fontFamilyCss || '"Patrick Hand", "Pangolin", "Shantell Sans", system-ui, sans-serif';
-      const fontWeight = block.fontWeight ?? 600;
+      const fontSizeCqw = block.fontSizeCqw ?? 2.4;
+      const fontFamilyCss = block.fontFamilyCss || '"Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
+      const fontWeight = block.fontWeight ?? 700;
       const lineHeightRatio = block.lineHeightRatio ?? 1.09;
       const strokeColor = block.strokeColor || "#ffffff";
       const strokeWidthEm = block.strokeWidthEm ?? 0.12;
-      const letterSpacing = `${block.letterSpacingEm ?? 0.01}em`;
+      const letterSpacing = (block.letterSpacingEm ?? 0.01) + "em";
       const textShadow = block.shadowColor
-        ? `0 0 3px ${block.shadowColor}, 0 0 7px ${block.shadowColor}`
+        ? "0 0 3px " + block.shadowColor + ", 0 0 7px " + block.shadowColor
         : "";
 
       const boxEl = document.createElement("div");
       boxEl.className = "img-text-block" + (block.isSingleLineStat ? " single-stat" : "");
-      boxEl.style.top = `${ymin / 10}%`;
-      boxEl.style.left = `${xmin / 10}%`;
-      boxEl.style.width = `${(xmax - xmin) / 10}%`;
-      boxEl.style.height = `${(ymax - ymin) / 10}%`;
+      boxEl.style.top = (ymin / 10) + "%";
+      boxEl.style.left = (xmin / 10) + "%";
+      boxEl.style.width = ((xmax - xmin) / 10) + "%";
+      boxEl.style.height = ((ymax - ymin) / 10) + "%";
       const tf = [];
-      if (block.rotationDeg) tf.push(`rotate(${block.rotationDeg}deg)`);
-      if (block.skewDeg) tf.push(`skewX(${block.skewDeg}deg)`);
+      if (block.rotationDeg) tf.push("rotate(" + block.rotationDeg + "deg)");
+      if (block.skewDeg) tf.push("skewX(" + block.skewDeg + "deg)");
       if (tf.length) boxEl.style.transform = tf.join(" ");
 
       const lines = Array.isArray(block.wrappedLines) && block.wrappedLines.length > 0
@@ -4755,7 +4748,7 @@
         const lineStrokeColor = (ls && ls.strokeColor) || strokeColor;
         const lineStrokeWidthEm = (ls && ls.strokeWidthEm) || strokeWidthEm;
         const lineShadow = (ls && ls.shadowColor)
-          ? `0 0 3px ${ls.shadowColor}, 0 0 7px ${ls.shadowColor}`
+          ? "0 0 3px " + ls.shadowColor + ", 0 0 7px " + ls.shadowColor
           : (ls && ls.hasTextStroke === false ? "" : textShadow);
 
         const span = document.createElement("span");
@@ -4765,16 +4758,16 @@
         span.style.fontFamily = fontFamilyCss;
         span.style.fontWeight = String(fontWeight);
         span.style.fontStyle = block.fontStyle || "normal";
-        span.style.fontSize = `${lineCqw}cqw`;
+        span.style.fontSize = lineCqw + "cqw";
         span.style.lineHeight = String(lineHeightRatio);
         span.style.letterSpacing = letterSpacing;
         if (lineShadow) span.style.textShadow = lineShadow;
         if (lineHasStroke) {
-          span.style.webkitTextStroke = `${lineStrokeWidthEm}em ${lineStrokeColor}`;
+          span.style.webkitTextStroke = lineStrokeWidthEm + "em " + lineStrokeColor;
           span.style.paintOrder = "stroke fill";
         }
         if ((!ls || !ls.textColor) && Array.isArray(block.gradientStops) && block.gradientStops.length === 2) {
-          span.style.backgroundImage = `linear-gradient(180deg, ${block.gradientStops[0]}, ${block.gradientStops[1]})`;
+          span.style.backgroundImage = "linear-gradient(180deg, " + block.gradientStops[0] + ", " + block.gradientStops[1] + ")";
           span.style.webkitBackgroundClip = "text";
           span.style.webkitTextFillColor = "transparent";
         }
@@ -4807,7 +4800,8 @@
       cls.className = "img-ctrl-btn";
       cls.title = "Kapat";
       cls.innerHTML = IMG_CLOSE_ICON;
-      cls.addEventListener("click", (e) => { e.stopPropagation(); removeImageState(img); });
+      swallowInteractive(cls);
+      cls.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); removeImageState(img); });
       bar.appendChild(cls);
       return;
     }
@@ -4817,8 +4811,10 @@
       retry.type = "button";
       retry.className = "img-ctrl-btn";
       retry.title = st.error || "Tekrar dene";
-      retry.innerHTML = `${IMG_REFRESH_ICON}<span>Tekrar Dene</span>`;
+      retry.innerHTML = IMG_REFRESH_ICON + "<span>Tekrar Dene</span>";
+      swallowInteractive(retry);
       retry.addEventListener("click", (e) => {
+        e.preventDefault();
         e.stopPropagation();
         translateImageElement(img, st.targetLang || imageTranslateTargetLang, true);
       });
@@ -4829,22 +4825,24 @@
       cls.className = "img-ctrl-btn";
       cls.title = "Kapat";
       cls.innerHTML = IMG_CLOSE_ICON;
-      cls.addEventListener("click", (e) => { e.stopPropagation(); removeImageState(img); });
+      swallowInteractive(cls);
+      cls.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); removeImageState(img); });
       bar.appendChild(cls);
       return;
     }
 
-    // Done state
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "img-ctrl-btn" + (st.shown ? " active" : "");
     toggleBtn.title = st.shown ? "Çeviriyi gizle (Orijinali gör)" : "Çeviriyi göster";
     toggleBtn.innerHTML = st.shown ? IMG_EYEOFF_ICON : IMG_EYE_ICON;
+    swallowInteractive(toggleBtn);
     toggleBtn.addEventListener("click", (e) => {
+      e.preventDefault();
       e.stopPropagation();
       st.shown = !st.shown;
+      if (st.overlayEl) st.overlayEl.style.display = st.shown ? "block" : "none";
       renderImgCtrlBar(img);
-      scheduleImgSync();
     });
     bar.appendChild(toggleBtn);
 
@@ -4853,7 +4851,9 @@
     reBtn.className = "img-ctrl-btn";
     reBtn.title = "Yeniden çevir";
     reBtn.innerHTML = IMG_REFRESH_ICON;
+    swallowInteractive(reBtn);
     reBtn.addEventListener("click", (e) => {
+      e.preventDefault();
       e.stopPropagation();
       translateImageElement(img, st.targetLang || imageTranslateTargetLang, true);
     });
@@ -4864,7 +4864,9 @@
     closeBtn.className = "img-ctrl-btn";
     closeBtn.title = "Çeviriyi kaldır";
     closeBtn.innerHTML = IMG_CLOSE_ICON;
+    swallowInteractive(closeBtn);
     closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
       e.stopPropagation();
       removeImageState(img);
     });
@@ -4884,36 +4886,39 @@
 
   async function translateImageElement(img, targetLang, forceRefresh) {
     if (!img || !img.isConnected) return;
-    ensureScanlationPageFonts();
-    ensureImgTranslateHost();
-    hideHoverBtn();
+    removeHoverAnchor();
 
     const prev = imgStates.get(img);
     if (prev && prev.status === "loading") return;
     if (prev) removeImageState(img);
 
+    const { container, anchor, shadow, ro } = createEmbeddedAnchor(img);
     const overlayEl = document.createElement("div");
     overlayEl.className = "img-overlay-wrap";
     overlayEl.style.display = "none";
-    imgOverlaysLayer.appendChild(overlayEl);
+    shadow.appendChild(overlayEl);
 
     const ctrlEl = document.createElement("div");
     ctrlEl.className = "img-ctrl-bar";
-    imgControlsLayer.appendChild(ctrlEl);
+    swallowInteractive(ctrlEl);
+    shadow.appendChild(ctrlEl);
 
     const st = {
       status: "loading",
       blocks: [],
       shown: true,
+      container,
+      anchor,
+      shadow,
       overlayEl,
       ctrlEl,
+      ro,
       toastTimer: null,
       targetLang: targetLang || imageTranslateTargetLang || "tr",
       error: ""
     };
     imgStates.set(img, st);
     renderImgCtrlBar(img);
-    scheduleImgSync();
 
     const rawSrc = img.currentSrc || img.src || "";
     let imageDataUrl = "";
@@ -4931,7 +4936,6 @@
       st.status = "error";
       st.error = "Görsel okunamadı: " + e.message;
       renderImgCtrlBar(img);
-      scheduleImgSync();
       return;
     }
 
@@ -4942,12 +4946,14 @@
       targetLang: st.targetLang,
       forceRefresh: !!forceRefresh
     }, (res) => {
-      if (!imgStates.has(img)) return;
+      if (!imgStates.has(img) || !img.isConnected) {
+        removeImageState(img);
+        return;
+      }
       if (!res || !res.success) {
         st.status = "error";
         st.error = (res && res.error) || "Görsel çevrilemedi.";
         renderImgCtrlBar(img);
-        scheduleImgSync();
         return;
       }
 
@@ -4958,7 +4964,6 @@
           ? "Görsel zaten hedef dilde"
           : "Görselde çevrilecek metin yok";
         renderImgCtrlBar(img);
-        scheduleImgSync();
         st.toastTimer = setTimeout(() => removeImageState(img), 3200);
         return;
       }
@@ -4967,8 +4972,9 @@
       st.blocks = blocks;
       st.shown = true;
       renderBlocksIntoOverlay(overlayEl, blocks);
+      overlayEl.style.display = "block";
       renderImgCtrlBar(img);
-      scheduleImgSync();
+      syncEmbeddedAnchorBounds(img, container, anchor);
     });
   }
 
@@ -4993,7 +4999,7 @@
     lastContextImg = found || null;
   }, true);
 
-  // Görsel üstü yüzen buton (hover)
+  // Görsel üstü gömülü hover butonu (kaydırmada sıfır hareket, sıfır taşma)
   let hoverCheckRaf = 0;
   let lastMouseEvt = null;
   document.addEventListener("mousemove", (e) => {
@@ -5004,29 +5010,30 @@
       hoverCheckRaf = 0;
       const ev = lastMouseEvt;
       if (!ev || imageTranslateBtnPos === "hidden") return;
-      if (imgHost && (ev.target === imgHost || imgHost.contains(ev.target))) return;
+      if (hoverState && hoverState.anchor && (ev.target === hoverState.anchor || hoverState.anchor.contains(ev.target))) {
+        return;
+      }
       const img = findImageAtPoint(ev.clientX, ev.clientY, ev.target);
       if (img && isEligibleImage(img) && !imgStates.has(img)) {
-        if (imgHoverHideTimer) { clearTimeout(imgHoverHideTimer); imgHoverHideTimer = null; }
-        ensureImgTranslateHost();
-        hoveredImg = img;
-        const box = getRenderedImageBox(img);
-        if (box) {
-          imgHoverBtn.style.display = "inline-flex";
-          placeCornerPill(imgHoverBtn, box, imageTranslateBtnPos);
-        }
-      } else if (hoveredImg) {
-        scheduleHideHoverBtn();
+        showHoverAnchorForImage(img);
+      } else if (hoverState) {
+        scheduleHideHoverAnchor();
       }
     });
   }, { passive: true });
 
   window.addEventListener("scroll", () => {
-    if (imgStates.size > 0 || hoveredImg) scheduleImgSync();
+    if (hoverState) removeHoverAnchor();
   }, { passive: true, capture: true });
 
   window.addEventListener("resize", () => {
-    if (imgStates.size > 0 || hoveredImg) scheduleImgSync();
+    if (hoverState && hoverState.img.isConnected) {
+      syncEmbeddedAnchorBounds(hoverState.img, hoverState.container, hoverState.anchor);
+    }
+    for (const [img, st] of imgStates.entries()) {
+      if (!img.isConnected) removeImageState(img);
+      else syncEmbeddedAnchorBounds(img, st.container, st.anchor);
+    }
   }, { passive: true });
 
 })();
