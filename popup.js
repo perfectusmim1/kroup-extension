@@ -1,9 +1,21 @@
 // CONSTANTS & DEFAULT CONFIG
 // NOT: API anahtarı koda gömülmez. Her kullanıcı kendi anahtarını Ayarlar'dan girer.
 const DEFAULT_API_KEY = "";
-const DEFAULT_MODEL = "gemini-3.8-flash";
-const LEGACY_MODEL = "gemini-3.6-flash";
-function normalizeModelName(m) { return m === LEGACY_MODEL ? DEFAULT_MODEL : (m || DEFAULT_MODEL); }
+const DEFAULT_MODEL = "gemini-4-hydrogen";
+const PRESET_MODELS = ["gemini-4-hydrogen", "gemini-3.5-flash-lite"];
+const LEGACY_MODELS = ["gemini-3.6-flash"];
+function normalizeModelName(m) {
+  const s = String(m || "").trim();
+  if (!s || LEGACY_MODELS.includes(s)) return DEFAULT_MODEL;
+  return s;
+}
+function extractGeminiText(data) {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts) || parts.length === 0) return "";
+  const nonThought = parts.filter((p) => !p.thought && typeof p.text === "string").map((p) => p.text).join("");
+  const raw = nonThought || (typeof parts[0]?.text === "string" ? parts[0].text : "");
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
 
 // LANGUAGE CATALOG
 const LANGUAGES = [
@@ -174,7 +186,7 @@ function buildLangOptionElement(lang) {
 // ilgili dropdown ilk kez acilirken kurulur.
 const LANG_SELECT_IDS = {
   "trans-source": 1, "trans-target": 1, "page-trans-target": 1, "reply-lang": 1,
-  "settings-x-target-lang": 1, "settings-inline-target-lang": 1,
+  "settings-x-target-lang": 1, "settings-inline-target-lang": 1, "settings-img-target-lang": 1,
   "yt-target-lang": 1, "yt-preferred-source": 1
 };
 const LANG_AUTO_IDS = { "trans-source": 1, "yt-preferred-source": 1 };
@@ -198,8 +210,8 @@ function syncCustomSelectActive(select) {
   });
 }
 
-// THEME CONTROLLER (Ayarlar > Tema; seçenekler: light / dark)
-const THEMES = ["light", "dark"];
+// THEME CONTROLLER (Ayarlar > Tema; seçenekler: light / dark / fresh)
+const THEMES = ["light", "dark", "fresh"];
 function normalizeTheme(t) { return THEMES.includes(t) ? t : "light"; }
 function applyTheme(name) {
   const theme = normalizeTheme(name);
@@ -225,7 +237,7 @@ const TAB_INFO = {
 (function restoreThemeImmediately() {
   try {
     const cached = localStorage.getItem("popupTheme");
-    if (cached === "dark" || cached === "light") {
+    if (THEMES.includes(cached)) {
       document.documentElement.setAttribute("data-theme", cached);
     }
   } catch (e) {}
@@ -317,6 +329,7 @@ const PANEL_INITTED = {};
 function ensurePanelInit(tabId) {
   if (PANEL_INITTED[tabId]) {
     if (tabId === "sound" && typeof renderSoundList === "function") renderSoundList();
+    if (tabId === "authenticator" && typeof refreshTotpActiveSite === "function") refreshTotpActiveSite();
     return;
   }
   PANEL_INITTED[tabId] = true;
@@ -333,14 +346,17 @@ function ensurePanelInit(tabId) {
 // STORAGE UTILITIES
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["apiKey", "modelName", "popupTheme", "selectionTranslationEnabled", "selectionSearchEnabled", "visualMenuEnabled", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "thinkingLevel", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "useMultiKeys", "geminiApiKeys", "transSource", "transTarget"], (result) => {
+    chrome.storage.local.get(["apiKey", "modelName", "modelMode", "popupTheme", "selectionTranslationEnabled", "selectionSearchEnabled", "visualMenuEnabled", "imageTranslateBtnPos", "imageTranslateTargetLang", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "thinkingLevel", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "useMultiKeys", "geminiApiKeys", "transSource", "transTarget"], (result) => {
       resolve({
         apiKey: result.apiKey || DEFAULT_API_KEY,
         modelName: normalizeModelName(result.modelName),
+        modelMode: result.modelMode || "",
         popupTheme: normalizeTheme(result.popupTheme),
         selectionTranslationEnabled: result.selectionTranslationEnabled !== false,
         selectionSearchEnabled: result.selectionSearchEnabled !== false,
         visualMenuEnabled: !!result.visualMenuEnabled,
+        imageTranslateBtnPos: (result.imageTranslateBtnPos === "left" || result.imageTranslateBtnPos === "hidden") ? result.imageTranslateBtnPos : "right",
+        imageTranslateTargetLang: result.imageTranslateTargetLang || "tr",
         searchMode: result.searchMode || "tab",
         selectionTranslateMode: result.selectionTranslateMode || "bubble",
         inlineTargetLang: result.inlineTargetLang || "tr",
@@ -557,7 +573,13 @@ function setupCopyHandlers() {
 // üzerinden thinking'siz varyantla bir kez daha dene.
 function geminiRequestVariants(requestBody) {
   const variants = [requestBody];
-  if (requestBody.generationConfig && requestBody.generationConfig.thinkingConfig) {
+  const tc = requestBody.generationConfig && requestBody.generationConfig.thinkingConfig;
+  if (tc) {
+    if (String(tc.thinkingLevel || "").toUpperCase() === "XHIGH") {
+      const highCopy = JSON.parse(JSON.stringify(requestBody));
+      highCopy.generationConfig.thinkingConfig.thinkingLevel = "HIGH";
+      variants.push(highCopy);
+    }
     const plain = JSON.parse(JSON.stringify(requestBody));
     delete plain.generationConfig.thinkingConfig;
     variants.push(plain);
@@ -642,19 +664,19 @@ async function callGeminiAPI(prompt, systemInstruction = null) {
   const bodies = geminiRequestVariants(requestBody);
   for (let i = 0; i < apiKeys.length; i++) {
     const apiKey = apiKeys[i];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${apiKey}`;
 
     let keyFailed = false;
     for (let v = 0; v < bodies.length; v++) {
       try {
         const data = await postGeminiBody(url, bodies[v]);
-        const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const candidateText = extractGeminiText(data);
 
         if (!candidateText) {
           throw new Error("Yapay zekadan boş bir yanıt döndü.");
         }
 
-        return candidateText.trim();
+        return candidateText;
       } catch (error) {
         if (v < bodies.length - 1 && geminiThinkingRejected(error)) {
           console.log("Model thinking desteklemiyor, thinking olmadan tekrar deneniyor...");
@@ -880,14 +902,47 @@ function initSettingsUI(settings) {
   if (themeInput) {
     themeInput.value = normalizeTheme(settings.popupTheme);
     updateCustomSelectUI("settings-theme");
+    if (!themeInput.dataset.previewWired) {
+      themeInput.dataset.previewWired = "1";
+      themeInput.addEventListener("change", (e) => {
+        document.documentElement.setAttribute("data-theme", normalizeTheme(e.target.value));
+      });
+    }
   }
-  document.getElementById("settings-model-name").value = settings.modelName;
-  updateCustomSelectUI("settings-model-name");
-  
+  const modelSelectInput = document.getElementById("settings-model-name");
+  const customModelGroup = document.getElementById("settings-custom-model-group");
+  const customModelInput = document.getElementById("settings-custom-model");
+  const isCustomModel = settings.modelMode === "custom" || !PRESET_MODELS.includes(settings.modelName);
+  if (modelSelectInput) {
+    modelSelectInput.value = isCustomModel ? "__custom__" : settings.modelName;
+    updateCustomSelectUI("settings-model-name");
+    if (customModelGroup) customModelGroup.hidden = !isCustomModel;
+    if (customModelInput) customModelInput.value = isCustomModel ? settings.modelName : "";
+    if (!modelSelectInput.dataset.customWired) {
+      modelSelectInput.dataset.customWired = "1";
+      modelSelectInput.addEventListener("change", (e) => {
+        const show = e.target.value === "__custom__";
+        if (customModelGroup) customModelGroup.hidden = !show;
+        if (show && customModelInput) customModelInput.focus();
+      });
+    }
+  }
+
   const thinkingLevelInput = document.getElementById("settings-thinking-level");
   if (thinkingLevelInput) {
     thinkingLevelInput.value = settings.thinkingLevel || "MINIMAL";
     updateCustomSelectUI("settings-thinking-level");
+  }
+
+  const imgBtnPosInput = document.getElementById("settings-img-btn-pos");
+  if (imgBtnPosInput) {
+    imgBtnPosInput.value = settings.imageTranslateBtnPos || "right";
+    updateCustomSelectUI("settings-img-btn-pos");
+  }
+  const imgTargetLangInput = document.getElementById("settings-img-target-lang");
+  if (imgTargetLangInput) {
+    imgTargetLangInput.value = settings.imageTranslateTargetLang || "tr";
+    updateCustomSelectUI("settings-img-target-lang");
   }
 
   document.getElementById("settings-selection-translate").checked = settings.selectionTranslationEnabled;
@@ -1094,9 +1149,15 @@ function setupSettingsActions() {
     const key = document.getElementById("settings-api-key").value.trim();
     const useMultiKeys = document.getElementById("settings-use-multi-keys").checked;
     const geminiApiKeys = document.getElementById("settings-multi-api-keys").value;
-    const model = document.getElementById("settings-model-name").value.trim();
+    const modelSelectVal = document.getElementById("settings-model-name").value.trim();
+    const modelMode = modelSelectVal === "__custom__" ? "custom" : "preset";
+    const model = modelMode === "custom"
+      ? (document.getElementById("settings-custom-model")?.value || "").trim()
+      : modelSelectVal;
     const theme = normalizeTheme(document.getElementById("settings-theme").value);
     const thinkingLevel = document.getElementById("settings-thinking-level").value;
+    const imageTranslateBtnPos = document.getElementById("settings-img-btn-pos")?.value || "right";
+    const imageTranslateTargetLang = document.getElementById("settings-img-target-lang")?.value || "tr";
     const selectionTranslationEnabled = document.getElementById("settings-selection-translate").checked;
     const selectionSearchEnabled = document.getElementById("settings-selection-search").checked;
     const visualMenuEnabled = document.getElementById("settings-visual-menu").checked;
@@ -1133,7 +1194,10 @@ function setupSettingsActions() {
     await saveSettings({
       apiKey: key,
       modelName: model,
+      modelMode,
       popupTheme: theme,
+      imageTranslateBtnPos,
+      imageTranslateTargetLang,
       selectionTranslationEnabled,
       selectionSearchEnabled,
       visualMenuEnabled,
@@ -1171,6 +1235,14 @@ function setupSettingsActions() {
     document.getElementById("settings-multi-api-keys").value = "";
     document.getElementById("settings-model-name").value = DEFAULT_MODEL;
     updateCustomSelectUI("settings-model-name");
+    const customGrpRst = document.getElementById("settings-custom-model-group");
+    if (customGrpRst) customGrpRst.hidden = true;
+    const customInpRst = document.getElementById("settings-custom-model");
+    if (customInpRst) customInpRst.value = "";
+    const imgPosRst = document.getElementById("settings-img-btn-pos");
+    if (imgPosRst) { imgPosRst.value = "right"; updateCustomSelectUI("settings-img-btn-pos"); }
+    const imgLangRst = document.getElementById("settings-img-target-lang");
+    if (imgLangRst) { imgLangRst.value = "tr"; updateCustomSelectUI("settings-img-target-lang"); }
     document.getElementById("settings-theme").value = "light";
     updateCustomSelectUI("settings-theme");
     applyTheme("light");
@@ -1215,7 +1287,10 @@ function setupSettingsActions() {
     await saveSettings({
       apiKey: DEFAULT_API_KEY,
       modelName: DEFAULT_MODEL,
+      modelMode: "preset",
       popupTheme: "light",
+      imageTranslateBtnPos: "right",
+      imageTranslateTargetLang: "tr",
       selectionTranslationEnabled: true,
       selectionSearchEnabled: true,
       visualMenuEnabled: false,
@@ -1270,8 +1345,11 @@ function setupSettingsActions() {
         useMultiKeys: document.getElementById("settings-use-multi-keys").checked,
         geminiApiKeys: document.getElementById("settings-multi-api-keys").value,
         modelName: document.getElementById("settings-model-name").value,
+        customModel: (document.getElementById("settings-custom-model")?.value || "").trim(),
         popupTheme: document.getElementById("settings-theme").value,
         thinkingLevel: document.getElementById("settings-thinking-level").value,
+        imageTranslateBtnPos: document.getElementById("settings-img-btn-pos")?.value || "right",
+        imageTranslateTargetLang: document.getElementById("settings-img-target-lang")?.value || "tr",
         selectionTranslationEnabled: document.getElementById("settings-selection-translate").checked,
         selectionSearchEnabled: document.getElementById("settings-selection-search").checked,
         visualMenuEnabled: document.getElementById("settings-visual-menu").checked,
@@ -1618,7 +1696,7 @@ function getYTSettings() {
   return new Promise((resolve) => {
     chrome.storage.local.get([
       "enabled", "targetLanguage", "preferredSourceLanguage",
-      "geminiModel", "geminiThinkingLevel",
+      "geminiModel", "ytModelMode", "geminiThinkingLevel",
       "fontSize", "styleShadow", "styleBox", "styleOutline",
       "subtitleBgOpacity", "subtitleBgColor", "subtitleFontColor", "subtitleFontWeight",
       "filterExtraExplanations", "translationParts",
@@ -1629,6 +1707,7 @@ function getYTSettings() {
         targetLanguage: r.targetLanguage || "tr",
         preferredSourceLanguage: r.preferredSourceLanguage || "auto",
         geminiModel: normalizeModelName(r.geminiModel),
+        ytModelMode: r.ytModelMode || "",
         geminiThinkingLevel: r.geminiThinkingLevel || "MEDIUM",
         fontSize: r.fontSize || 24,
         styleShadow: r.styleShadow !== false,
@@ -1729,6 +1808,7 @@ function ytCaptureSnapshot() {
       targetLanguage: document.getElementById("yt-target-lang")?.value,
       preferredSourceLanguage: document.getElementById("yt-preferred-source")?.value,
       geminiModel: document.getElementById("yt-gemini-model")?.value,
+      ytCustomModel: (document.getElementById("yt-custom-model")?.value || "").trim(),
       geminiThinkingLevel: document.getElementById("yt-thinking-level")?.value,
       fontSize: document.getElementById("yt-font-size")?.value,
       styleShadow: document.getElementById("yt-style-shadow")?.checked,
@@ -1768,8 +1848,24 @@ function ytApplySettingsToUI(s) {
   document.getElementById("yt-preferred-source").value = s.preferredSourceLanguage;
   updateCustomSelectUI("yt-preferred-source");
 
-  document.getElementById("yt-gemini-model").value = s.geminiModel;
-  updateCustomSelectUI("yt-gemini-model");
+  const ytModelInp = document.getElementById("yt-gemini-model");
+  const ytCustomGrp = document.getElementById("yt-custom-model-group");
+  const ytCustomInp = document.getElementById("yt-custom-model");
+  const ytIsCustom = s.ytModelMode === "custom" || !PRESET_MODELS.includes(s.geminiModel);
+  if (ytModelInp) {
+    ytModelInp.value = ytIsCustom ? "__custom__" : s.geminiModel;
+    updateCustomSelectUI("yt-gemini-model");
+    if (ytCustomGrp) ytCustomGrp.hidden = !ytIsCustom;
+    if (ytCustomInp) ytCustomInp.value = ytIsCustom ? s.geminiModel : "";
+    if (!ytModelInp.dataset.customWired) {
+      ytModelInp.dataset.customWired = "1";
+      ytModelInp.addEventListener("change", (e) => {
+        const show = e.target.value === "__custom__";
+        if (ytCustomGrp) ytCustomGrp.hidden = !show;
+        if (show && ytCustomInp) ytCustomInp.focus();
+      });
+    }
+  }
   document.getElementById("yt-thinking-level").value = s.geminiThinkingLevel;
   updateCustomSelectUI("yt-thinking-level");
   document.getElementById("yt-trans-parts").value = String(s.translationParts);
@@ -2108,7 +2204,10 @@ function setupYouTubePanel() {
       enabled: document.getElementById("yt-enabled").checked,
       targetLanguage: document.getElementById("yt-target-lang").value || "tr",
       preferredSourceLanguage: document.getElementById("yt-preferred-source").value || "auto",
-      geminiModel: normalizeModelName(document.getElementById("yt-gemini-model").value),
+      ytModelMode: document.getElementById("yt-gemini-model").value === "__custom__" ? "custom" : "preset",
+      geminiModel: document.getElementById("yt-gemini-model").value === "__custom__"
+        ? normalizeModelName(document.getElementById("yt-custom-model")?.value)
+        : normalizeModelName(document.getElementById("yt-gemini-model").value),
       geminiThinkingLevel: document.getElementById("yt-thinking-level").value || "MEDIUM",
       fontSize: parseInt(document.getElementById("yt-font-size").value, 10) || 24,
       styleShadow: document.getElementById("yt-style-shadow").checked,
@@ -2191,16 +2290,16 @@ function setupYouTubePanel() {
 }
 
 // ============================================================
-// AUTHENTICATOR (TOTP, RFC 6238 - tamamen yerel, sunucusuz)
+// AKILLI DOĞRULAYICI (TOTP, RFC 6238 — simge, düzenleme, site eşleştirme)
 // ============================================================
 function totpBase32Decode(s) {
   const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  s = s.trim().replace(/[\s-]/g, "").replace(/=+$/, "").toUpperCase();
+  s = String(s || "").trim().replace(/[\s-]/g, "").replace(/=+$/, "").toUpperCase();
   let bits = 0, val = 0;
   const out = [];
   for (const ch of s) {
     const i = A.indexOf(ch);
-    if (i < 0) throw new Error("Gecersiz gizli anahtar.");
+    if (i < 0) throw new Error("Geçersiz gizli anahtar.");
     val = (val << 5) | i;
     bits += 5;
     if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; }
@@ -2224,77 +2323,473 @@ function totpParseOtpauth(uri) {
   const u = new URL(uri.trim());
   if (u.protocol !== "otpauth:" || u.hostname.indexOf("totp") !== 0) throw new Error("Desteklenmeyen URI.");
   const secret = u.searchParams.get("secret");
-  if (!secret) throw new Error("URI icinde secret yok.");
-  const issuer = u.searchParams.get("issuer") || "";
-  let label = decodeURIComponent(u.pathname.replace(/^\//, ""));
-  // Etiket genelde "site:hesap" formatindadir; tekrari bastan temizle.
-  if (issuer && label.toLowerCase().indexOf(issuer.toLowerCase() + ":") === 0) {
-    label = label.slice(issuer.length + 1);
+  if (!secret) throw new Error("URI içinde secret yok.");
+  let issuer = (u.searchParams.get("issuer") || "").trim();
+  let label = decodeURIComponent(u.pathname.replace(/^\//, "")).trim();
+  if (!issuer && label.includes(":")) {
+    const idx = label.indexOf(":");
+    issuer = label.slice(0, idx).trim();
+    label = label.slice(idx + 1).trim();
+  } else if (issuer && label.toLowerCase().indexOf(issuer.toLowerCase() + ":") === 0) {
+    label = label.slice(issuer.length + 1).trim();
   }
-  label = label.trim() || "Hesap";
+  label = label || "Hesap";
   totpBase32Decode(secret);
-  return { id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), label, issuer, secret: secret.replace(/[\s-]/g, "") };
+  const domain = totpInferDomain({ issuer, label, domain: "" });
+  return {
+    id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    label,
+    issuer,
+    domain,
+    icon: "",
+    secret: secret.replace(/[\s-]/g, "")
+  };
 }
 
-// Kayitlihesaplarda da tekrar olusmus olabilir; gosterimde her kosulda tekle.
-function totpDisplayName(a) {
+const TOTP_KNOWN_DOMAINS = {
+  github: "github.com",
+  gitlab: "gitlab.com",
+  google: "google.com",
+  gmail: "google.com",
+  youtube: "youtube.com",
+  discord: "discord.com",
+  twitter: "x.com",
+  "x.com": "x.com",
+  steam: "steampowered.com",
+  cloudflare: "cloudflare.com",
+  microsoft: "microsoft.com",
+  outlook: "outlook.com",
+  live: "live.com",
+  azure: "azure.com",
+  amazon: "amazon.com",
+  aws: "aws.amazon.com",
+  instagram: "instagram.com",
+  facebook: "facebook.com",
+  meta: "meta.com",
+  twitch: "twitch.tv",
+  npm: "npmjs.com",
+  vercel: "vercel.com",
+  supabase: "supabase.com",
+  binance: "binance.com",
+  coinbase: "coinbase.com",
+  kraken: "kraken.com",
+  bybit: "bybit.com",
+  okx: "okx.com",
+  epic: "epicgames.com",
+  riot: "riotgames.com",
+  valorant: "playvalorant.com",
+  reddit: "reddit.com",
+  linkedin: "linkedin.com",
+  bitwarden: "bitwarden.com",
+  proton: "proton.me",
+  paypal: "paypal.com",
+  openai: "openai.com",
+  chatgpt: "chatgpt.com",
+  anthropic: "claude.ai",
+  claude: "claude.ai",
+  apple: "apple.com",
+  icloud: "icloud.com",
+  dropbox: "dropbox.com",
+  slack: "slack.com",
+  notion: "notion.so",
+  figma: "figma.com",
+  stripe: "stripe.com",
+  spotify: "spotify.com",
+  netflix: "netflix.com",
+  adobe: "adobe.com",
+  digitalocean: "digitalocean.com",
+  hetzner: "hetzner.com",
+  namecheap: "namecheap.com",
+  godaddy: "godaddy.com",
+  heroku: "heroku.com",
+  netlify: "netlify.com",
+  railway: "railway.app",
+  docker: "docker.com",
+  roblox: "roblox.com",
+  ea: "ea.com",
+  ubisoft: "ubisoft.com",
+  blizzard: "battle.net",
+  battlenet: "battle.net",
+  playstation: "playstation.com",
+  xbox: "xbox.com",
+  nintendo: "nintendo.com",
+  edevlet: "turkiye.gov.tr",
+  turkiye: "turkiye.gov.tr",
+  sahibinden: "sahibinden.com",
+  trendyol: "trendyol.com",
+  hepsiburada: "hepsiburada.com",
+  n11: "n11.com",
+  papara: "papara.com",
+  btcturk: "btcturk.com",
+  paribu: "paribu.com"
+};
+
+const TOTP_MONOGRAM_COLORS = [
+  "#0d9488", "#0284c7", "#059669", "#d97706",
+  "#e11d48", "#0891b2", "#ea580c", "#475569"
+];
+
+function totpCleanDomain(raw) {
+  let s = String(raw || "").trim().toLowerCase();
+  if (!s) return "";
+  try {
+    if (s.includes("://")) s = new URL(s).hostname.toLowerCase();
+  } catch (e) { void e; }
+  s = s.replace(/^www\./, "").split("/")[0].split(":")[0].trim();
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(s) ? s : "";
+}
+
+function totpRootDomain(host) {
+  const h = totpCleanDomain(host);
+  if (!h) return "";
+  const parts = h.split(".");
+  if (parts.length <= 2) return h;
+  const last2 = parts.slice(-2).join(".");
+  if (/^(co|com|org|net|gov|edu|gen|bel|pol|tsk|k12|av|dr)\.[a-z]{2}$/.test(last2) && parts.length >= 3) {
+    return parts.slice(-3).join(".");
+  }
+  return last2;
+}
+
+function totpInferDomain(acc) {
+  const explicit = totpCleanDomain(acc.domain);
+  if (explicit) return explicit;
+  const hay = ((acc.issuer || "") + " " + (acc.label || "")).toLowerCase();
+  const domMatch = hay.match(/\b([a-z0-9-]+\.(?:com|net|org|io|gg|tv|me|ai|so|dev|app|gov\.tr|com\.tr|co\.uk))\b/);
+  if (domMatch && !hay.includes("@" + domMatch[1])) return domMatch[1];
+  for (const [kw, dom] of Object.entries(TOTP_KNOWN_DOMAINS)) {
+    if (kw.length <= 2) {
+      if (new RegExp("(^|[^a-z0-9])" + kw + "([^a-z0-9]|$)").test(hay)) return dom;
+    } else if (hay.includes(kw)) {
+      return dom;
+    }
+  }
+  return "";
+}
+
+function totpMonogramColor(seed) {
+  let h = 0;
+  const s = String(seed || "A");
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return TOTP_MONOGRAM_COLORS[Math.abs(h) % TOTP_MONOGRAM_COLORS.length];
+}
+
+function totpPrimaryTitle(a) {
   const issuer = (a.issuer || "").trim();
   let label = (a.label || "").trim();
   if (issuer && label.toLowerCase().indexOf(issuer.toLowerCase() + ":") === 0) {
     label = label.slice(issuer.length + 1).trim();
   }
-  if (!label) return issuer || "Hesap";
-  return issuer ? issuer + " - " + label : label;
+  return issuer || label || "Hesap";
 }
+
+function totpSubtitle(a) {
+  const issuer = (a.issuer || "").trim();
+  let label = (a.label || "").trim();
+  if (issuer && label.toLowerCase().indexOf(issuer.toLowerCase() + ":") === 0) {
+    label = label.slice(issuer.length + 1).trim();
+  }
+  const dom = totpCleanDomain(a.domain);
+  if (issuer && label && label.toLowerCase() !== issuer.toLowerCase()) {
+    return dom ? label + " · " + dom : label;
+  }
+  return dom || "";
+}
+
+let refreshTotpActiveSite = null;
 
 function setupAuthenticator() {
   const listEl = document.getElementById("totp-list");
   const timerEl = document.getElementById("totp-timer");
+  const ringEl = document.getElementById("totp-ring-fg");
+  const searchEl = document.getElementById("totp-search");
+  const siteBannerEl = document.getElementById("totp-site-banner");
+  const siteFavEl = document.getElementById("totp-site-fav");
+  const siteTextEl = document.getElementById("totp-site-text");
+  const addCardEl = document.getElementById("totp-add-card");
+  const toggleAddBtn = document.getElementById("totp-toggle-add");
+  const issuerEl = document.getElementById("totp-issuer");
   const labelEl = document.getElementById("totp-label");
+  const domainEl = document.getElementById("totp-domain");
+  const iconEl = document.getElementById("totp-icon");
   const secretEl = document.getElementById("totp-secret");
-  if (!listEl) return;
-  let accounts = [];
-  let lastStep = -1;
+  const useActiveSiteBtn = document.getElementById("totp-use-active-site");
 
-  const save = () => chrome.storage.local.set({ totpAccounts: accounts });
-  const load = () => chrome.storage.local.get(["totpAccounts"], (res) => {
-    accounts = Array.isArray(res.totpAccounts) ? res.totpAccounts : [];
-    render(true);
-  });
+  const editModal = document.getElementById("totp-edit-modal");
+  const editIdEl = document.getElementById("totp-edit-id");
+  const editIssuerEl = document.getElementById("totp-edit-issuer");
+  const editLabelEl = document.getElementById("totp-edit-label");
+  const editDomainEl = document.getElementById("totp-edit-domain");
+  const editIconEl = document.getElementById("totp-edit-icon");
+  const editUseSiteBtn = document.getElementById("totp-edit-use-site");
+
+  if (!listEl) return;
+
+  let accounts = [];
+  let siteUsage = {};
+  let activeHost = "";
+  let activeRoot = "";
+  let lastStep = -1;
+  let searchQuery = "";
+  const RING_CIRC = 97.39;
+
+  const saveAccounts = () => chrome.storage.local.set({ totpAccounts: accounts });
+  const saveUsage = () => chrome.storage.local.set({ totpSiteUsage: siteUsage });
+
+  function queryActiveSite(cb) {
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const t = tabs && tabs[0];
+        const url = (t && t.url) || "";
+        if (/^https?:\/\//i.test(url)) {
+          activeHost = totpCleanDomain(url);
+          activeRoot = totpRootDomain(activeHost);
+        } else {
+          activeHost = "";
+          activeRoot = "";
+        }
+        if (cb) cb();
+      });
+    } catch (e) {
+      activeHost = "";
+      activeRoot = "";
+      if (cb) cb();
+    }
+  }
+
+  refreshTotpActiveSite = () => {
+    queryActiveSite(() => render(true));
+  };
+
+  function getMatchScore(acc) {
+    if (!activeRoot && !activeHost) return { score: 0, count: 0, lastUsed: 0 };
+    const uRoot = (activeRoot && siteUsage[activeRoot] && siteUsage[activeRoot][acc.id]) || null;
+    const uHost = (activeHost && siteUsage[activeHost] && siteUsage[activeHost][acc.id]) || null;
+    const u = uHost || uRoot;
+    if (u && u.count > 0) {
+      return { score: 3, count: u.count || 0, lastUsed: u.lastUsed || 0 };
+    }
+    const accDom = totpCleanDomain(acc.domain);
+    const accRoot = totpRootDomain(accDom);
+    if (accDom && (accDom === activeHost || accRoot === activeRoot)) {
+      return { score: 2, count: 0, lastUsed: 0 };
+    }
+    const infDom = totpInferDomain(acc);
+    if (infDom && (infDom === activeHost || totpRootDomain(infDom) === activeRoot)) {
+      return { score: 1, count: 0, lastUsed: 0 };
+    }
+    const siteBrand = (activeRoot || "").split(".")[0];
+    if (siteBrand && siteBrand.length >= 3) {
+      const hay = ((acc.issuer || "") + " " + (acc.label || "")).toLowerCase();
+      if (hay.includes(siteBrand)) return { score: 1, count: 0, lastUsed: 0 };
+    }
+    return { score: 0, count: 0, lastUsed: 0 };
+  }
+
+  function recordCopyForActiveSite(acc) {
+    if (!activeRoot) return;
+    if (!siteUsage[activeRoot]) siteUsage[activeRoot] = {};
+    const prev = siteUsage[activeRoot][acc.id] || { count: 0, lastUsed: 0 };
+    siteUsage[activeRoot][acc.id] = {
+      count: (prev.count || 0) + 1,
+      lastUsed: Date.now()
+    };
+    saveUsage();
+    if (!totpCleanDomain(acc.domain) && !totpInferDomain(acc)) {
+      acc.domain = activeRoot;
+      saveAccounts();
+    }
+  }
+
+  function buildAccountIconEl(acc) {
+    const wrap = document.createElement("div");
+    wrap.className = "totp-icon-wrap";
+    const title = totpPrimaryTitle(acc);
+    const customIcon = (acc.icon || "").trim();
+    if (customIcon) {
+      wrap.textContent = customIcon;
+      wrap.style.backgroundColor = "var(--bg-secondary)";
+      wrap.style.color = "var(--text-primary)";
+      wrap.style.fontSize = "19px";
+      return wrap;
+    }
+    const setMonogram = () => {
+      wrap.classList.remove("has-img");
+      wrap.innerHTML = "";
+      wrap.style.backgroundColor = totpMonogramColor(title);
+      wrap.style.color = "#ffffff";
+      wrap.textContent = title.charAt(0).toUpperCase() || "?";
+    };
+    const dom = totpInferDomain(acc);
+    if (dom) {
+      wrap.classList.add("has-img");
+      const img = document.createElement("img");
+      img.src = "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(dom) + "&sz=64";
+      img.alt = "";
+      img.draggable = false;
+      img.addEventListener("error", setMonogram, { once: true });
+      img.addEventListener("load", () => {
+        if (img.naturalWidth <= 16 && img.naturalHeight <= 16) setMonogram();
+      }, { once: true });
+      wrap.appendChild(img);
+    } else {
+      setMonogram();
+    }
+    return wrap;
+  }
+
+  function openEditModal(acc) {
+    if (!editModal) return;
+    editIdEl.value = acc.id;
+    editIssuerEl.value = acc.issuer || "";
+    editLabelEl.value = acc.label || "";
+    editDomainEl.value = acc.domain || totpInferDomain(acc) || "";
+    editIconEl.value = acc.icon || "";
+    editModal.hidden = false;
+    editIssuerEl.focus();
+  }
+
+  function closeEditModal() {
+    if (editModal) editModal.hidden = true;
+  }
 
   function render(force) {
     if (!accounts.length) {
-      listEl.innerHTML = '<div class="yt-cache-empty">Henuz hesap yok.</div>';
+      if (siteBannerEl) siteBannerEl.hidden = true;
+      if (addCardEl) addCardEl.hidden = false;
+      listEl.innerHTML = '<div class="yt-cache-empty">Henüz hesap yok. Yukarıdan yeni bir doğrulama anahtarı ekle.</div>';
       return;
     }
-    if (listEl.querySelector(".yt-cache-empty") || force || listEl.children.length !== accounts.length) {
+
+    const q = searchQuery.trim().toLowerCase();
+    const ranked = accounts
+      .map((acc, origIdx) => ({ acc, origIdx, m: getMatchScore(acc) }))
+      .filter(({ acc }) => {
+        if (!q) return true;
+        const hay = [acc.issuer, acc.label, acc.domain, totpInferDomain(acc)].join(" ").toLowerCase();
+        return hay.includes(q);
+      })
+      .sort((a, b) => {
+        if (b.m.score !== a.m.score) return b.m.score - a.m.score;
+        if (b.m.count !== a.m.count) return b.m.count - a.m.count;
+        if (b.m.lastUsed !== a.m.lastUsed) return b.m.lastUsed - a.m.lastUsed;
+        return a.origIdx - b.origIdx;
+      });
+
+    const matchCount = ranked.filter((x) => x.m.score > 0).length;
+    if (siteBannerEl) {
+      if (activeRoot && matchCount > 0) {
+        siteBannerEl.hidden = false;
+        if (siteFavEl) {
+          siteFavEl.src = "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(activeRoot) + "&sz=32";
+          siteFavEl.style.display = "";
+          siteFavEl.onerror = () => { siteFavEl.style.display = "none"; };
+        }
+        if (siteTextEl) {
+          siteTextEl.textContent = activeRoot + " için eşleşen " + (matchCount > 1 ? matchCount + " kod" : "kod") + " en üstte";
+        }
+      } else {
+        siteBannerEl.hidden = true;
+      }
+    }
+
+    if (!ranked.length) {
+      listEl.innerHTML = '<div class="yt-cache-empty">Aramayla eşleşen hesap bulunamadı.</div>';
+      return;
+    }
+
+    if (force || listEl.querySelector(".yt-cache-empty")) {
+      lastStep = -1;
       listEl.innerHTML = "";
-      accounts.forEach((a) => {
-        const row = document.createElement("div");
-        row.className = "yt-cache-item";
-        row.dataset.id = a.id;
-        row.innerHTML = '<div class="yt-cache-item-info"><span class="yt-cache-item-title"></span><span class="totp-code" title="Kopyala">......</span></div><button class="yt-cache-item-delete" title="Sil"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>';
-        row.querySelector(".yt-cache-item-title").textContent = totpDisplayName(a);
-        // Satirin tamamına tiklaninca kodu kopyala (sil düğmesi hariç)
-        row.addEventListener("click", (e) => {
-          if (e.target.closest(".yt-cache-item-delete")) return;
-          const codeEl = row.querySelector(".totp-code");
-          const code = codeEl.dataset.code;
-          if (!code || code.indexOf(".") !== -1) return;
-          copyToClipboard(code).then(() => {
-            codeEl.dataset.orig = codeEl.textContent;
-            codeEl.textContent = "Kopyalandi!";
-            setTimeout(() => { codeEl.textContent = codeEl.dataset.orig || code; }, 1200);
-          });
-        });
-        row.querySelector(".yt-cache-item-delete").addEventListener("click", (e) => {
+      ranked.forEach(({ acc, m }) => {
+        const isMatched = m.score > 0;
+        const card = document.createElement("div");
+        card.className = "totp-card" + (isMatched ? " is-matched" : "");
+        card.dataset.id = acc.id;
+
+        card.appendChild(buildAccountIconEl(acc));
+
+        const info = document.createElement("div");
+        info.className = "totp-card-info";
+        const head = document.createElement("div");
+        head.className = "totp-card-head";
+        const titleEl = document.createElement("span");
+        titleEl.className = "totp-card-title";
+        titleEl.textContent = totpPrimaryTitle(acc);
+        head.appendChild(titleEl);
+        if (isMatched) {
+          const tag = document.createElement("span");
+          tag.className = "totp-match-tag";
+          tag.textContent = "Bu site";
+          head.appendChild(tag);
+        }
+        info.appendChild(head);
+
+        const subStr = totpSubtitle(acc);
+        if (subStr) {
+          const subEl = document.createElement("span");
+          subEl.className = "totp-card-sub";
+          subEl.textContent = subStr;
+          info.appendChild(subEl);
+        }
+        card.appendChild(info);
+
+        const right = document.createElement("div");
+        right.className = "totp-card-right";
+        const codeEl = document.createElement("span");
+        codeEl.className = "totp-code";
+        codeEl.title = "Kopyalamak için tıkla";
+        codeEl.textContent = "••• •••";
+        right.appendChild(codeEl);
+
+        const acts = document.createElement("div");
+        acts.className = "totp-card-actions";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "totp-icon-btn";
+        editBtn.title = "Düzenle";
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+        editBtn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (!confirm("Bu hesap silinsin mi?")) return;
-          accounts = accounts.filter((x) => x.id !== a.id);
-          save();
+          openEditModal(acc);
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "totp-icon-btn danger";
+        delBtn.title = "Sil";
+        delBtn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>';
+        delBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!confirm('"' + totpPrimaryTitle(acc) + '" hesabı silinsin mi?')) return;
+          accounts = accounts.filter((x) => x.id !== acc.id);
+          saveAccounts();
           render(true);
         });
-        listEl.appendChild(row);
+
+        acts.appendChild(editBtn);
+        acts.appendChild(delBtn);
+        right.appendChild(acts);
+        card.appendChild(right);
+
+        card.addEventListener("click", (e) => {
+          if (e.target.closest(".totp-icon-btn")) return;
+          const code = codeEl.dataset.code;
+          if (!code || code.length < 6) return;
+          copyToClipboard(code).then(() => {
+            recordCopyForActiveSite(acc);
+            card.classList.add("is-copied");
+            const prevText = code.slice(0, 3) + " " + code.slice(3);
+            codeEl.textContent = "Kopyalandı ✓";
+            setTimeout(() => {
+              card.classList.remove("is-copied");
+              const cur = codeEl.dataset.code;
+              codeEl.textContent = cur ? (cur.slice(0, 3) + " " + cur.slice(3)) : prevText;
+            }, 1250);
+          });
+        });
+
+        listEl.appendChild(card);
       });
     }
     tick();
@@ -2303,38 +2798,114 @@ function setupAuthenticator() {
   async function tick() {
     const now = Date.now();
     const step = Math.floor(now / 30000);
-    if (timerEl) timerEl.textContent = String(30 - Math.floor(now / 1000) % 30);
+    const rem = 30 - (Math.floor(now / 1000) % 30);
+    if (timerEl) timerEl.textContent = String(rem);
+    if (ringEl) {
+      ringEl.style.strokeDashoffset = String(RING_CIRC * (1 - rem / 30));
+      ringEl.classList.toggle("danger", rem <= 4);
+      ringEl.classList.toggle("warn", rem > 4 && rem <= 8);
+    }
     if (step === lastStep) return;
     lastStep = step;
-    for (const row of listEl.querySelectorAll(".yt-cache-item")) {
-      const a = accounts.find((x) => x.id === row.dataset.id);
-      const codeEl = row.querySelector(".totp-code");
-      if (!a || !codeEl) continue;
+    for (const card of listEl.querySelectorAll(".totp-card")) {
+      const acc = accounts.find((x) => x.id === card.dataset.id);
+      const codeEl = card.querySelector(".totp-code");
+      if (!acc || !codeEl) continue;
       try {
-        const code = await totpCode(a.secret, now);
+        const code = await totpCode(acc.secret, now);
         codeEl.dataset.code = code;
-        if (codeEl.textContent !== "Kopyalandi!") codeEl.textContent = code.slice(0, 3) + " " + code.slice(3);
+        if (!card.classList.contains("is-copied")) {
+          codeEl.textContent = code.slice(0, 3) + " " + code.slice(3);
+        }
       } catch (e) {
         codeEl.textContent = "Hata";
       }
     }
   }
 
+  if (toggleAddBtn && addCardEl) {
+    toggleAddBtn.addEventListener("click", () => {
+      addCardEl.hidden = !addCardEl.hidden;
+      if (!addCardEl.hidden && issuerEl) issuerEl.focus();
+    });
+  }
+
+  if (searchEl) {
+    searchEl.addEventListener("input", () => {
+      searchQuery = searchEl.value;
+      render(true);
+    });
+  }
+
+  if (useActiveSiteBtn && domainEl) {
+    useActiveSiteBtn.addEventListener("click", () => {
+      if (activeRoot) {
+        domainEl.value = activeRoot;
+        if (issuerEl && !issuerEl.value.trim()) {
+          const brand = activeRoot.split(".")[0];
+          issuerEl.value = brand.charAt(0).toUpperCase() + brand.slice(1);
+        }
+      } else {
+        alert("Aktif sekmede geçerli bir web sitesi bulunamadı.");
+      }
+    });
+  }
+
+  if (editUseSiteBtn && editDomainEl) {
+    editUseSiteBtn.addEventListener("click", () => {
+      if (activeRoot) editDomainEl.value = activeRoot;
+      else alert("Aktif sekmede geçerli bir web sitesi bulunamadı.");
+    });
+  }
+
+  document.getElementById("totp-edit-close")?.addEventListener("click", closeEditModal);
+  document.getElementById("totp-edit-cancel")?.addEventListener("click", closeEditModal);
+  document.getElementById("totp-edit-save")?.addEventListener("click", () => {
+    const id = editIdEl.value;
+    const acc = accounts.find((x) => x.id === id);
+    if (!acc) { closeEditModal(); return; }
+    acc.issuer = editIssuerEl.value.trim();
+    acc.label = editLabelEl.value.trim() || acc.issuer || "Hesap";
+    acc.domain = totpCleanDomain(editDomainEl.value) || editDomainEl.value.trim().toLowerCase();
+    acc.icon = editIconEl.value.trim();
+    saveAccounts();
+    closeEditModal();
+    render(true);
+  });
+
   document.getElementById("totp-add-btn").addEventListener("click", () => {
     const raw = secretEl.value.trim();
-    if (!raw) { alert("Gizli anahtar gir."); return; }
+    if (!raw) { alert("Gizli anahtar veya otpauth:// bağlantısı girin."); return; }
     try {
       let acc;
       if (raw.toLowerCase().indexOf("otpauth://") === 0) {
         acc = totpParseOtpauth(raw);
+        if (issuerEl && issuerEl.value.trim()) acc.issuer = issuerEl.value.trim();
+        if (labelEl && labelEl.value.trim()) acc.label = labelEl.value.trim();
+        if (domainEl && domainEl.value.trim()) acc.domain = totpCleanDomain(domainEl.value) || domainEl.value.trim().toLowerCase();
+        if (iconEl && iconEl.value.trim()) acc.icon = iconEl.value.trim();
       } else {
         totpBase32Decode(raw);
-        acc = { id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), label: labelEl.value.trim() || "Hesap", issuer: "", secret: raw.replace(/[\s-]/g, "") };
+        const issuerVal = (issuerEl && issuerEl.value.trim()) || "";
+        const labelVal = (labelEl && labelEl.value.trim()) || issuerVal || "Hesap";
+        const domVal = (domainEl && (totpCleanDomain(domainEl.value) || domainEl.value.trim().toLowerCase())) || "";
+        acc = {
+          id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+          issuer: issuerVal,
+          label: labelVal,
+          domain: domVal || totpInferDomain({ issuer: issuerVal, label: labelVal, domain: "" }),
+          icon: (iconEl && iconEl.value.trim()) || "",
+          secret: raw.replace(/[\s-]/g, "")
+        };
       }
       accounts.unshift(acc);
-      save();
-      labelEl.value = "";
+      saveAccounts();
+      if (issuerEl) issuerEl.value = "";
+      if (labelEl) labelEl.value = "";
+      if (domainEl) domainEl.value = "";
+      if (iconEl) iconEl.value = "";
       secretEl.value = "";
+      if (addCardEl) addCardEl.hidden = true;
       render(true);
     } catch (e) {
       alert("Eklenemedi: " + e.message);
@@ -2361,17 +2932,36 @@ function setupAuthenticator() {
         let added = 0;
         for (const it of items) {
           try {
-            if (typeof it === "string" && it.toLowerCase().indexOf("otpauth://") === 0) { accounts.unshift(totpParseOtpauth(it)); added++; }
-            else if (typeof it === "string") { totpBase32Decode(it); accounts.unshift({ id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), label: "Hesap", issuer: "", secret: it.replace(/[\s-]/g, "") }); added++; }
-            else if (it && it.secret) { totpBase32Decode(it.secret); accounts.unshift({ id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), label: String(it.label || it.name || "Hesap"), issuer: String(it.issuer || ""), secret: String(it.secret).replace(/[\s-]/g, "") }); added++; }
+            if (typeof it === "string" && it.toLowerCase().indexOf("otpauth://") === 0) {
+              accounts.unshift(totpParseOtpauth(it));
+              added++;
+            } else if (typeof it === "string") {
+              totpBase32Decode(it);
+              accounts.unshift({ id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7), label: "Hesap", issuer: "", domain: "", icon: "", secret: it.replace(/[\s-]/g, "") });
+              added++;
+            } else if (it && it.secret) {
+              totpBase32Decode(it.secret);
+              const issuer = String(it.issuer || "");
+              const label = String(it.label || it.name || "Hesap");
+              const domain = totpCleanDomain(it.domain) || totpInferDomain({ issuer, label, domain: "" });
+              accounts.unshift({
+                id: "totp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+                label,
+                issuer,
+                domain,
+                icon: String(it.icon || ""),
+                secret: String(it.secret).replace(/[\s-]/g, "")
+              });
+              added++;
+            }
           } catch (err) { void err; }
         }
-        if (!added) { alert("Dosyada gecerli hesap bulunamadi."); return; }
-        save();
+        if (!added) { alert("Dosyada geçerli hesap bulunamadı."); return; }
+        saveAccounts();
         render(true);
-        alert(added + " hesap ice aktarildi.");
+        alert(added + " hesap içe aktarıldı.");
       } catch (err) {
-        alert("Dosya okunamadi: " + err.message);
+        alert("Dosya okunamadı: " + err.message);
       }
     };
     r.readAsText(f);
@@ -2379,7 +2969,14 @@ function setupAuthenticator() {
 
   document.getElementById("totp-export-btn").addEventListener("click", () => {
     if (!accounts.length) { alert("Yedeklenecek hesap yok."); return; }
-    const blob = new Blob([JSON.stringify(accounts.map((a) => ({ label: a.label, issuer: a.issuer, secret: a.secret })), null, 2)], { type: "application/json" });
+    const payload = accounts.map((a) => ({
+      label: a.label,
+      issuer: a.issuer || "",
+      domain: a.domain || "",
+      icon: a.icon || "",
+      secret: a.secret
+    }));
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const d = new Date();
@@ -2392,7 +2989,11 @@ function setupAuthenticator() {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   });
 
-  load();
+  chrome.storage.local.get(["totpAccounts", "totpSiteUsage"], (res) => {
+    accounts = Array.isArray(res.totpAccounts) ? res.totpAccounts : [];
+    siteUsage = (res.totpSiteUsage && typeof res.totpSiteUsage === "object") ? res.totpSiteUsage : {};
+    queryActiveSite(() => render(true));
+  });
   setInterval(tick, 1000);
 }
 
@@ -2648,22 +3249,41 @@ function setupMusicPanel() {
 }
 
 // ============================================================
-// SES MIKSERI (sekme listesi + yuzde + mute)
-// Seviye degisimi background/offscreen hattiyla uygulanir.
+// SADELEŞTİRİLMİŞ SES MİKSERİ (düz kart listesi, hızlı filtre, tek tık sıfırla)
 // ============================================================
+let soundFilterMode = "auto"; // "auto" | "active" | "all"
+
 function setupSoundPanel() {
-  try { chrome.storage.local.get(["soundCollapsed"], (res) => { soundCollapsed = (res && res.soundCollapsed) || {}; }); } catch (e) { void e; }
-  try { chrome.storage.local.get(["soundMutedHosts"], (res) => { soundMutedHosts = (res && res.soundMutedHosts) || {}; }); } catch (e) { void e; }
-}
+  const activeBtn = document.getElementById("sound-filter-active");
+  const allBtn = document.getElementById("sound-filter-all");
+  const resetBtn = document.getElementById("sound-reset-all");
 
-let soundCollapsed = {};
-let soundMutedHosts = {};
+  const setFilter = (mode) => {
+    soundFilterMode = mode;
+    if (activeBtn) activeBtn.classList.toggle("active", mode === "active");
+    if (allBtn) allBtn.classList.toggle("active", mode === "all");
+    renderSoundList();
+  };
 
-function soundHostOf(tab) {
-  try {
-    const h = new URL(tab.url || "").hostname.toLowerCase().replace(/^www\./, "");
-    return h || "diğer";
-  } catch (e) { return "diğer"; }
+  activeBtn?.addEventListener("click", () => setFilter("active"));
+  allBtn?.addEventListener("click", () => setFilter("all"));
+
+  resetBtn?.addEventListener("click", async () => {
+    try {
+      const tabs = await chrome.tabs.query({});
+      await Promise.all(tabs.map((t) => new Promise((resolve) => {
+        if (t.mutedInfo && t.mutedInfo.muted) {
+          chrome.tabs.update(t.id, { muted: false }, () => resolve());
+        } else {
+          resolve();
+        }
+      })));
+      await Promise.all(tabs.map((t) => new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: "mixer-set-volume", tabId: t.id, volume: 100 }, () => resolve());
+      })));
+    } catch (e) { void e; }
+    renderSoundList();
+  });
 }
 
 function soundShowError(msg) {
@@ -2676,241 +3296,201 @@ function soundShowError(msg) {
 
 function renderSoundList() {
   const listEl = document.getElementById("sound-list");
+  const activeBtn = document.getElementById("sound-filter-active");
+  const allBtn = document.getElementById("sound-filter-all");
+  const resetBtn = document.getElementById("sound-reset-all");
   if (!listEl) return;
   soundShowError(null);
+
+  const SPK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+  const SPKX = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
+
   Promise.all([
     chrome.tabs.query({}),
     new Promise((resolve) => {
       chrome.runtime.sendMessage({ action: "mixer-get-state" }, (res) => {
         resolve(res && res.success ? res : { gains: {}, captured: [] });
       });
-    }),
-    new Promise((resolve) => {
-      try { chrome.storage.local.get(["soundCollapsed", "soundMutedHosts"], (res) => { soundCollapsed = (res && res.soundCollapsed) || soundCollapsed || {}; soundMutedHosts = (res && res.soundMutedHosts) || soundMutedHosts || {}; resolve(); }); }
-      catch (e) { resolve(); }
     })
   ]).then(([tabs, state]) => {
     const gains = state.gains || {};
-    const captured = new Set(state.captured || []);
+    const supportedTabs = tabs.filter((t) => {
+      if (!t.url) return true;
+      if (/^(chrome|edge|about|chrome-extension|view-source|devtools|chrome-search):/i.test(t.url)) return false;
+      try {
+        if (/(^|\.)chromewebstore\.google\.com$/i.test(new URL(t.url).hostname || "")) return false;
+      } catch (e) { void e; }
+      return true;
+    });
+
+    const isAdjusted = (t) => (gains[t.id] !== undefined && gains[t.id] < 100) || (t.mutedInfo && t.mutedInfo.muted);
+    const activeTabs = supportedTabs.filter((t) => t.audible || isAdjusted(t));
+    const hasAnyModified = supportedTabs.some(isAdjusted);
+
+    if (soundFilterMode === "auto") {
+      soundFilterMode = activeTabs.length > 0 ? "active" : "all";
+    }
+    if (activeBtn) {
+      activeBtn.textContent = "Ses Çalanlar (" + activeTabs.length + ")";
+      activeBtn.classList.toggle("active", soundFilterMode === "active");
+    }
+    if (allBtn) {
+      allBtn.textContent = "Tüm Sekmeler (" + supportedTabs.length + ")";
+      allBtn.classList.toggle("active", soundFilterMode === "all");
+    }
+    if (resetBtn) resetBtn.hidden = !hasAnyModified;
+
+    const shownTabs = (soundFilterMode === "active" ? activeTabs : supportedTabs)
+      .slice()
+      .sort((a, b) =>
+        ((b.audible ? 1 : 0) - (a.audible ? 1 : 0)) ||
+        ((isAdjusted(b) ? 1 : 0) - (isAdjusted(a) ? 1 : 0)) ||
+        ((b.active ? 1 : 0) - (a.active ? 1 : 0)) ||
+        (a.windowId - b.windowId) ||
+        (a.index - b.index)
+      );
+
     listEl.innerHTML = "";
-    if (!tabs.length) {
-      listEl.innerHTML = '<div class="yt-cache-empty">Açık sekme yok.</div>';
+    if (!shownTabs.length) {
+      const empty = document.createElement("div");
+      empty.className = "sound-empty-state";
+      empty.innerHTML = '<span>' + (soundFilterMode === "active" ? "Şu an ses çalan sekme yok." : "Desteklenen açık sekme yok.") + '</span>';
+      if (soundFilterMode === "active" && supportedTabs.length > 0) {
+        const showAllBtn = document.createElement("button");
+        showAllBtn.type = "button";
+        showAllBtn.className = "btn btn-secondary btn-small";
+        showAllBtn.textContent = "Tüm Sekmeleri Göster";
+        showAllBtn.addEventListener("click", () => {
+          soundFilterMode = "all";
+          renderSoundList();
+        });
+        empty.appendChild(showAllBtn);
+      }
+      listEl.appendChild(empty);
       return;
     }
-    const groups = new Map(); // host -> [{ tab, row }]
-    tabs
-      .slice()
-      .sort((a, b) => ((b.audible ? 1 : 0) - (a.audible ? 1 : 0)) || (a.windowId - b.windowId) || (a.index - b.index))
-      .forEach((tab) => {
-        const row = document.createElement("div");
-        row.className = "yt-cache-item";
-        row.style.gap = "8px";
 
-        const fav = document.createElement("span");
-        fav.className = "sound-fav";
-        if (tab.favIconUrl) {
-          const img = document.createElement("img");
-          img.src = tab.favIconUrl;
-          img.alt = "";
-          img.draggable = false;
-          img.addEventListener("error", () => {
-            fav.textContent = (tab.title || "?").trim().charAt(0).toUpperCase() || "?";
-          }, { once: true });
-          fav.appendChild(img);
-        } else {
+    shownTabs.forEach((tab) => {
+      const isMuted = !!(tab.mutedInfo && tab.mutedInfo.muted);
+      const curVol = gains[tab.id] !== undefined ? gains[tab.id] : 100;
+
+      const card = document.createElement("div");
+      card.className = "sound-card" + (tab.audible ? " is-playing" : "") + (isMuted ? " is-muted" : "");
+
+      const top = document.createElement("div");
+      top.className = "sound-card-top";
+
+      const fav = document.createElement("div");
+      fav.className = "sound-card-fav";
+      if (tab.favIconUrl) {
+        const img = document.createElement("img");
+        img.src = tab.favIconUrl;
+        img.alt = "";
+        img.draggable = false;
+        img.addEventListener("error", () => {
+          img.remove();
           fav.textContent = (tab.title || "?").trim().charAt(0).toUpperCase() || "?";
-        }
-        row.appendChild(fav);
-
-        const info = document.createElement("div");
-        info.className = "yt-cache-item-info";
-        const title = document.createElement("span");
-        title.className = "yt-cache-item-title sound-title";
-        title.textContent = tab.title || "Sekme";
-        title.title = (tab.title || "") + " — sekmeye gitmek için tıkla";
-        title.addEventListener("click", () => {
-          chrome.windows.update(tab.windowId, { focused: true }, () => { void chrome.runtime.lastError; });
-          chrome.tabs.update(tab.id, { active: true }, () => { void chrome.runtime.lastError; });
-        });
-        info.appendChild(title);
-
-        const sub = document.createElement("span");
-        sub.className = "yt-cache-item-meta";
+        }, { once: true });
+        fav.appendChild(img);
+      } else {
+        fav.textContent = (tab.title || "?").trim().charAt(0).toUpperCase() || "?";
+      }
+      if (tab.audible) {
         const dot = document.createElement("span");
-        dot.className = "sound-dot" + (tab.audible ? " on" : "");
-        sub.appendChild(dot);
-        const subText = document.createElement("span");
-        subText.textContent = tab.audible ? "ses çalıyor" : (captured.has(tab.id) ? "mikserde" : "sessiz");
-        sub.appendChild(subText);
-        info.appendChild(sub);
+        dot.className = "sound-playing-badge";
+        dot.title = "Ses çalıyor";
+        fav.appendChild(dot);
+      }
+      top.appendChild(fav);
 
-        const slider = document.createElement("input");
-        slider.type = "range";
-        slider.min = "0";
-        slider.max = "100";
-        slider.value = String(gains[tab.id] !== undefined ? gains[tab.id] : 100);
-        slider.className = "yt-range sound-slider";
-        slider.title = "Ses seviyesi (%)";
-        // Tarayıcı/mağaza sayfaları yakalanamaz: en baştan kilitle.
-        const soundUnsupported = (tab.url && (/^(chrome|edge|about|chrome-extension|view-source|devtools|chrome-search):/i.test(tab.url)
-          || /(^|\.)chromewebstore\.google\.com$/i.test(new URL(tab.url).hostname || ""))) || false;
-        if (soundUnsupported) {
-          slider.disabled = true;
-          slider.title = "Bu sayfa türü desteklenmez";
-          if (subText) subText.textContent = "desteklenmez";
-        }
-        info.appendChild(slider);
-        row.appendChild(info);
+      const title = document.createElement("span");
+      title.className = "sound-card-title";
+      title.textContent = tab.title || "Sekme";
+      title.title = (tab.title || "") + " — sekmeye gitmek için tıkla";
+      title.addEventListener("click", () => {
+        chrome.windows.update(tab.windowId, { focused: true }, () => { void chrome.runtime.lastError; });
+        chrome.tabs.update(tab.id, { active: true }, () => { void chrome.runtime.lastError; });
+      });
+      top.appendChild(title);
 
-        const pct = document.createElement("span");
-        pct.className = "sound-pct";
-        pct.textContent = slider.value + "%";
-        row.appendChild(pct);
-
-        const muteBtn = document.createElement("button");
-        muteBtn.className = "yt-cache-item-delete";
-        muteBtn.title = tab.mutedInfo && tab.mutedInfo.muted ? "Sesi aç" : "Sessize al";
-        const paintMute = (muted) => {
-          muteBtn.innerHTML = muted
-            ? '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>'
-            : '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
-          muteBtn.classList.toggle("muted", !!muted);
-          muteBtn.title = muted ? "Sesi aç" : "Sessize al";
-        };
-        paintMute(tab.mutedInfo && tab.mutedInfo.muted);
-        muteBtn.addEventListener("click", () => {
-          chrome.tabs.get(tab.id, (fresh) => {
-            if (chrome.runtime.lastError || !fresh) return;
-            const next = !(fresh.mutedInfo && fresh.mutedInfo.muted);
-            chrome.tabs.update(tab.id, { muted: next }, (updated) => {
-              if (chrome.runtime.lastError || !updated) return;
-              paintMute(updated.mutedInfo && updated.mutedInfo.muted);
-            });
+      const muteBtn = document.createElement("button");
+      muteBtn.type = "button";
+      muteBtn.className = "sound-mute-btn" + (isMuted ? " muted" : "");
+      muteBtn.innerHTML = isMuted ? SPKX : SPK;
+      muteBtn.title = isMuted ? "Sesi aç" : "Sessize al";
+      muteBtn.addEventListener("click", () => {
+        chrome.tabs.get(tab.id, (fresh) => {
+          if (chrome.runtime.lastError || !fresh) return;
+          const next = !(fresh.mutedInfo && fresh.mutedInfo.muted);
+          chrome.tabs.update(tab.id, { muted: next }, (updated) => {
+            if (chrome.runtime.lastError || !updated) return;
+            const mutedNow = !!(updated.mutedInfo && updated.mutedInfo.muted);
+            muteBtn.innerHTML = mutedNow ? SPKX : SPK;
+            muteBtn.classList.toggle("muted", mutedNow);
+            muteBtn.title = mutedNow ? "Sesi aç" : "Sessize al";
+            card.classList.toggle("is-muted", mutedNow);
+            if (resetBtn && mutedNow) resetBtn.hidden = false;
           });
         });
-        row.appendChild(muteBtn);
-
-        let deb = null;
-        let busy = false;
-        slider.addEventListener("input", () => {
-          pct.textContent = slider.value + "%";
-          if (deb) clearTimeout(deb);
-          deb = setTimeout(() => {
-            if (busy) return;
-            busy = true;
-            slider.disabled = true;
-            chrome.runtime.sendMessage({ action: "mixer-set-volume", tabId: tab.id, volume: Number(slider.value) }, (res) => {
-              busy = false;
-              slider.disabled = false;
-              if (chrome.runtime.lastError || !res || !res.success) {
-                slider.value = "100";
-                pct.textContent = "100%";
-                const code = res && res.code;
-                const msg = (res && res.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || "bilinmiyor";
-                // Chrome kurali: sekmeye gecip simgeye bir kez tiklanmamis.
-                // Tarif satirda kalici dursun, kullanici okuyup uygulasin.
-                if (code === "need-grant" && subText) {
-                  subText.textContent = "yetki gerek: sekmeye geçip simgeye bir kez tıkla";
-                }
-                soundShowError("Ses ayarlanamadı: " + msg);
-              } else if (subText) {
-                subText.textContent = Number(slider.value) === 100
-                  ? (tab.audible ? "ses çalıyor" : "sessiz")
-                  : "mikserde";
-              }
-            });
-          }, 250);
-        });
-
-        const host = soundHostOf(tab);
-        if (!groups.has(host)) groups.set(host, []);
-        groups.get(host).push({ tab, row });
       });
-    renderSoundGroups(listEl, groups);
-  }).catch(() => {
-    listEl.innerHTML = '<div class="yt-cache-empty">Liste alınamadı.</div>';
-  });
-}
+      top.appendChild(muteBtn);
+      card.appendChild(top);
 
-// Ayni sitenin sekmelerini grup basligi altinda toplar (tek sekme duz satir kalir).
-function renderSoundGroups(listEl, groups) {
-  const SPK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
-  const SPKX = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
-  const entries = Array.from(groups.entries()).sort((a, b) => {
-    const aud = (items) => items.filter((x) => x.tab.audible).length;
-    return (aud(b[1]) - aud(a[1])) || (b[1].length - a[1].length) || (a[0] < b[0] ? -1 : 1);
-  });
-  entries.forEach(([host, items]) => {
-    if (items.length < 2) { listEl.appendChild(items[0].row); return; }
-    const playing = items.filter((x) => x.tab.audible).length;
-    const head = document.createElement("div");
-    head.className = "yt-cache-item sound-group-head";
-    const chev = document.createElement("button");
-    chev.className = "sound-collapse-btn";
-    head.appendChild(chev);
-    const fav = document.createElement("span");
-    fav.className = "sound-fav";
-    const firstFav = items[0].tab.favIconUrl;
-    if (firstFav) {
-      const img = document.createElement("img");
-      img.src = firstFav;
-      img.alt = "";
-      img.draggable = false;
-      img.addEventListener("error", () => { fav.textContent = host.charAt(0).toUpperCase(); }, { once: true });
-      fav.appendChild(img);
-    } else {
-      fav.textContent = host.charAt(0).toUpperCase();
-    }
-    head.appendChild(fav);
-    const info = document.createElement("div");
-    info.className = "yt-cache-item-info";
-    const t = document.createElement("span");
-    t.className = "yt-cache-item-title";
-    t.textContent = `${host} (${items.length})`;
-    info.appendChild(t);
-    const m = document.createElement("span");
-    m.className = "yt-cache-item-meta";
-    m.textContent = playing ? `${playing} sekmede ses çalıyor` : `${items.length} sekme`;
-    info.appendChild(m);
-    head.appendChild(info);
-    const gMute = document.createElement("button");
-    gMute.className = "yt-cache-item-delete";
-    const paintGroup = () => {
-      const allMuted = items.every((x) => x.tab.mutedInfo && x.tab.mutedInfo.muted);
-      gMute.innerHTML = allMuted ? SPKX : SPK;
-      gMute.classList.toggle("muted", allMuted);
-      gMute.title = allMuted ? "Grubun sesini aç" : "Grubu sustur";
-    };
-    paintGroup();
-    gMute.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const next = !items.every((x) => x.tab.mutedInfo && x.tab.mutedInfo.muted);
-      if (next) soundMutedHosts[host] = true; else delete soundMutedHosts[host];
-      try { chrome.storage.local.set({ soundMutedHosts }); } catch (err) { void err; }
-      Promise.all(items.map((x) => new Promise((res) => {
-        chrome.tabs.update(x.tab.id, { muted: next }, () => res());
-      }))).then(() => renderSoundList());
+      const ctrls = document.createElement("div");
+      ctrls.className = "sound-card-controls";
+
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = "0";
+      slider.max = "100";
+      slider.value = String(curVol);
+      slider.className = "sound-card-slider";
+      slider.title = "Ses seviyesi";
+
+      const pct = document.createElement("span");
+      pct.className = "sound-card-pct";
+      pct.textContent = curVol + "%";
+      pct.title = "100% yapmak için çift tıkla";
+
+      let deb = null;
+      let busy = false;
+      const sendVolume = (val) => {
+        if (busy) return;
+        busy = true;
+        chrome.runtime.sendMessage({ action: "mixer-set-volume", tabId: tab.id, volume: val }, (res) => {
+          busy = false;
+          if (chrome.runtime.lastError || !res || !res.success) {
+            slider.value = "100";
+            pct.textContent = "100%";
+            const msg = (res && res.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || "bilinmiyor";
+            soundShowError("Ses ayarlanamadı: " + msg);
+          } else {
+            soundShowError(null);
+            if (resetBtn && val < 100) resetBtn.hidden = false;
+          }
+        });
+      };
+
+      slider.addEventListener("input", () => {
+        const val = Number(slider.value);
+        pct.textContent = val + "%";
+        if (deb) clearTimeout(deb);
+        deb = setTimeout(() => sendVolume(val), 160);
+      });
+
+      pct.addEventListener("dblclick", () => {
+        slider.value = "100";
+        pct.textContent = "100%";
+        if (deb) clearTimeout(deb);
+        sendVolume(100);
+      });
+
+      ctrls.appendChild(slider);
+      ctrls.appendChild(pct);
+      card.appendChild(ctrls);
+      listEl.appendChild(card);
     });
-    head.appendChild(gMute);
-    const kids = document.createElement("div");
-    kids.className = "sound-group-children";
-    items.forEach((x) => kids.appendChild(x.row));
-    const syncChev = () => {
-      chev.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-      chev.classList.toggle("collapsed", !!kids.hidden);
-      chev.title = kids.hidden ? "Grubu göster" : "Grubu gizle";
-    };
-    kids.hidden = !!soundCollapsed[host];
-    syncChev();
-    const toggle = () => {
-      kids.hidden = !kids.hidden;
-      if (kids.hidden) soundCollapsed[host] = true; else delete soundCollapsed[host];
-      try { chrome.storage.local.set({ soundCollapsed }); } catch (e) { void e; }
-      syncChev();
-    };
-    chev.addEventListener("click", (e) => { e.stopPropagation(); toggle(); });
-    head.addEventListener("click", toggle);
-    listEl.appendChild(head);
-    listEl.appendChild(kids);
+  }).catch(() => {
+    listEl.innerHTML = '<div class="sound-empty-state">Sekme listesi alınamadı.</div>';
   });
 }

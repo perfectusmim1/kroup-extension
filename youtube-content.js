@@ -12,7 +12,7 @@ let translationEngine = 'gemini';
 let geminiApiKey = '';
 let useMultiKeys = false;
 let geminiApiKeys = '';
-let geminiModel = 'gemini-3.8-flash';
+let geminiModel = 'gemini-4-hydrogen';
 let geminiThinkingLevel = 'MEDIUM';
 let fontSize = 24;
 let styleShadow = true;
@@ -30,7 +30,23 @@ let ytCommentsEnabled = true;
 let isCachedTranslation = false;
 // API anahtarı genel Ayarlar sekmesinden gelir. Koda anahtar gömülmez.
 const YT_FALLBACK_API_KEY = "";
-function ytNormalizeModelName(m) { return m === 'gemini-3.6-flash' ? 'gemini-3.8-flash' : (m || 'gemini-3.8-flash'); }
+function ytNormalizeModelName(m) { const s = String(m || '').trim(); return (!s || s === 'gemini-3.6-flash') ? 'gemini-4-hydrogen' : s; }
+function ytBuildThinkingBodies(baseBody, level) {
+  const lv = String(level || 'MEDIUM').toUpperCase();
+  const plain = JSON.parse(JSON.stringify(baseBody));
+  delete plain.generationConfig.thinkingConfig;
+  if (lv === 'NONE') return [plain];
+  const withLv = JSON.parse(JSON.stringify(baseBody));
+  withLv.generationConfig.thinkingConfig = { thinkingLevel: lv };
+  const list = [withLv];
+  if (lv === 'XHIGH') {
+    const highCopy = JSON.parse(JSON.stringify(baseBody));
+    highCopy.generationConfig.thinkingConfig = { thinkingLevel: 'HIGH' };
+    list.push(highCopy);
+  }
+  list.push(plain);
+  return list;
+}
 
 let availableTracks = [];
 let activeTrack = null;
@@ -1943,10 +1959,7 @@ async function ytGeminiJsonArray(loadToken, modelName, keysToTry, promptText) {
       maxOutputTokens: 65536
     }
   };
-  const bodies = [baseBody];
-  const plainBody = JSON.parse(JSON.stringify(baseBody));
-  delete plainBody.generationConfig.thinkingConfig;
-  bodies.push(plainBody);
+  const bodies = ytBuildThinkingBodies(baseBody, geminiThinkingLevel);
 
   const ytThinkingRejected = (msg) => {
     const m = msg || '';
@@ -2126,12 +2139,12 @@ ${JSON.stringify(partSubtitles.map(b => ({
         maxOutputTokens: 65536
       }
     };
-    const ytPlainBody = JSON.parse(JSON.stringify(ytBaseBody));
-    delete ytPlainBody.generationConfig.thinkingConfig;
+    const ytBodies = ytBuildThinkingBodies(ytBaseBody, geminiThinkingLevel);
     const ytAttempts = [];
     keysToTry.forEach(k => {
-      ytAttempts.push({ key: k, thinking: true });
-      ytAttempts.push({ key: k, thinking: false });
+      ytBodies.forEach((b) => {
+        ytAttempts.push({ key: k, body: b, thinking: !!b.generationConfig.thinkingConfig });
+      });
     });
 
     let partDone = false;
@@ -2151,7 +2164,7 @@ ${JSON.stringify(partSubtitles.map(b => ({
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(useThinking ? ytBaseBody : ytPlainBody)
+          body: JSON.stringify(ytAttempts[a].body)
         });
 
         if (loadToken !== subtitleLoadToken) return;
@@ -2220,13 +2233,13 @@ ${JSON.stringify(partSubtitles.map(b => ({
       } catch (fetchErr) {
         if (loadToken !== subtitleLoadToken) return;
         const rawMsg = fetchErr.message || '';
-        const nextIsPlainFallback = useThinking && a + 1 < ytAttempts.length && ytAttempts[a + 1].key === currentKey && !ytAttempts[a + 1].thinking;
-        if (nextIsPlainFallback && (rawMsg.includes('400') || /thinking/i.test(rawMsg))) {
-          console.log(`[YT Translator] Part ${p + 1} thinking reddedildi, thinking olmadan tekrar deneniyor.`);
-          setPanelStatus(`Model thinking desteklemiyor, sade modda tekrar deneniyor...`);
+        const hasNextForSameKey = a + 1 < ytAttempts.length && ytAttempts[a + 1].key === currentKey;
+        if (useThinking && hasNextForSameKey && (rawMsg.includes('400') || /thinking/i.test(rawMsg))) {
+          console.log(`[YT Translator] Part ${p + 1} thinking seviyesi reddedildi, alt varyant deneniyor.`);
+          setPanelStatus(`Düşünme seviyesi düşürülerek tekrar deneniyor...`);
           continue;
         }
-        if (nextIsPlainFallback) a++; // key hatasında thinking'siz kopyayı atla, direkt sonraki key
+        while (a + 1 < ytAttempts.length && ytAttempts[a + 1].key === currentKey) a++; // key hatasında kalan varyantları atla, direkt sonraki key
         let errMsg = rawMsg;
         if (errMsg.includes('400')) {
           errMsg = `API request invalid. Model name or settings might be incorrect. (${modelName})`;

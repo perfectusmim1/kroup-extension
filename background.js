@@ -1,10 +1,36 @@
 // NOT: API anahtarı koda gömülmez. Her kullanıcı kendi anahtarını Ayarlar'dan girer.
 const DEFAULT_API_KEY = "";
-const DEFAULT_MODEL = "gemini-3.8-flash";
-const LEGACY_MODEL = "gemini-3.6-flash";
-function normalizeModelName(m) { return m === LEGACY_MODEL ? DEFAULT_MODEL : (m || DEFAULT_MODEL); }
+const DEFAULT_MODEL = "gemini-4-hydrogen";
+const LEGACY_MODELS = ["gemini-3.6-flash"];
+function normalizeModelName(m) {
+  const s = String(m || "").trim();
+  if (!s || LEGACY_MODELS.includes(s)) return DEFAULT_MODEL;
+  return s;
+}
+function extractGeminiText(data) {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts) || parts.length === 0) return "";
+  const nonThought = parts.filter((p) => !p.thought && typeof p.text === "string").map((p) => p.text).join("");
+  const raw = nonThought || (typeof parts[0]?.text === "string" ? parts[0].text : "");
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+function applyThinkingConfig(genConfig, thinkingLevel) {
+  const level = String(thinkingLevel || "MINIMAL").toUpperCase();
+  if (level !== "NONE") {
+    genConfig.thinkingConfig = { thinkingLevel: level };
+  }
+  return genConfig;
+}
+function thinkingMaxTokens(base, thinkingLevel) {
+  const level = String(thinkingLevel || "MINIMAL").toUpperCase();
+  if (level === "XHIGH" || level === "HIGH") return Math.max(base, 32768);
+  if (level === "MEDIUM" || level === "LOW") return Math.max(base, 16384);
+  return Math.max(base, 8192);
+}
 const DEFAULT_USE_MULTI_KEYS = false;
 const DEFAULT_GEMINI_API_KEYS = "";
+const IMG_TRANS_CACHE = new Map();
+const IMG_TRANS_CACHE_MAX = 40;
 
 // Bellek ici Gemini yanit onbellegi + ucus halindeki es istek birlestirme.
 // Sayfa/X yorumu gibi ayni metnin defalarca cevrilmesini API'ye gitmeden cozer.
@@ -160,6 +186,21 @@ chrome.runtime.onInstalled.addListener(() => {
   setupDeclarativeNetRequestRules();
   setupContextMenus();
   try { chrome.storage.local.remove(["dsToken", "dsChats", "dsActiveId", "dsLastResult", "dsVerifiedAt", "dsWasmBin", "dsWasmUrl"]); } catch (e) {}
+  // Eski varsayilan gemini-3.8-flash / 3.6-flash kurulumlarini manuel secim degilse gemini-4-hydrogen'e gecir
+  try {
+    chrome.storage.local.get(["modelName", "modelMode", "geminiModel", "ytModelMode", "imageTranslateBtnPos", "imageTranslateTargetLang"], (r) => {
+      const patch = {};
+      if (r.modelMode !== "custom" && (!r.modelName || r.modelName === "gemini-3.8-flash" || r.modelName === "gemini-3.6-flash")) {
+        patch.modelName = DEFAULT_MODEL;
+      }
+      if (r.ytModelMode !== "custom" && (!r.geminiModel || r.geminiModel === "gemini-3.8-flash" || r.geminiModel === "gemini-3.6-flash")) {
+        patch.geminiModel = DEFAULT_MODEL;
+      }
+      if (!r.imageTranslateBtnPos) patch.imageTranslateBtnPos = "right";
+      if (!r.imageTranslateTargetLang) patch.imageTranslateTargetLang = "tr";
+      if (Object.keys(patch).length > 0) chrome.storage.local.set(patch);
+    });
+  } catch (e) { void e; }
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -167,7 +208,7 @@ chrome.runtime.onStartup.addListener(() => {
   setupContextMenus();
 });
 
-// Sağ tık menüsü (görsel çevir öğesi ayarlardan açılıp kapatılabilir)
+// Sağ tık menüsü (görsel çevir her zaman resimlerde aktif; alan seçerek çevir ayarlardan açılıp kapatılabilir)
 function setupContextMenus() {
   if (!chrome.contextMenus) return;
   chrome.storage.local.get(["visualMenuEnabled"], (res) => {
@@ -178,10 +219,15 @@ function setupContextMenus() {
           title: "Gemini ile Sayfayı Çevir",
           contexts: ["page"]
         });
+        chrome.contextMenus.create({
+          id: "gemini-translate-image",
+          title: "Gemini ile Görseli Çevir",
+          contexts: ["image"]
+        });
         if (res.visualMenuEnabled) {
           chrome.contextMenus.create({
             id: "gemini-visual-translate",
-            title: "Gemini ile Görsel Çevir (Alan Seç)",
+            title: "Gemini ile Alan Seçerek Çevir",
             contexts: ["page"]
           });
         }
@@ -198,6 +244,7 @@ chrome.storage.onChanged.addListener((changes) => {
   // Model/anahtar degisince bellek onbellegindeki eski sonuclar gecersiz kalir
   if (changes.apiKey || changes.modelName || changes.thinkingLevel || changes.useMultiKeys || changes.geminiApiKeys) {
     GEM_MEM_CACHE.clear();
+    IMG_TRANS_CACHE.clear();
   }
 });
 
@@ -216,6 +263,19 @@ if (chrome.commands && chrome.commands.onCommand) {
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (!tab || tab.id === undefined) return;
+  if (info.menuItemId === "gemini-translate-image") {
+    chrome.storage.local.get(["imageTranslateTargetLang"], (res) => {
+      const targetLang = (res && res.imageTranslateTargetLang) || "tr";
+      chrome.tabs.sendMessage(tab.id, {
+        action: "image-translate-context",
+        srcUrl: info.srcUrl || "",
+        targetLang
+      }, () => {
+        void chrome.runtime.lastError;
+      });
+    });
+    return;
+  }
   if (info.menuItemId === "gemini-visual-translate") {
     chrome.tabs.sendMessage(tab.id, { action: "visual-translate-start" }, () => {
       void chrome.runtime.lastError;
@@ -341,6 +401,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       () => handleVisualTranslation(message.imageData, message.targetLang))
       .then((translation) => sendResponse({ success: true, translation }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
+    return true;
+  } else if (message.action === "image-translate-run") {
+    handleImageTranslatePipeline({
+      imageSrc: message.imageSrc || "",
+      imageDataUrl: message.imageDataUrl || "",
+      targetLang: message.targetLang || "tr",
+      forceRefresh: !!message.forceRefresh
+    })
+      .then((res) => sendResponse(res))
+      .catch((error) => sendResponse({ success: false, error: error.message || "Görsel çevrilemedi." }));
     return true;
   } else if (message.action === "shazam-recognize-uri") {
     handleShazamQuery(message.uri, message.samplems)
@@ -491,11 +561,17 @@ async function ytFetchJSON(message) {
   }
 }
 
-// Lite modeller thinkingConfig'i 400 ile reddedebilir; o durumda aynı key
-// üzerinden thinking'siz varyantla bir kez daha dene.
+// Lite veya farklı modeller thinkingConfig/XHIGH'ı 400 ile reddedebilir;
+// XHIGH -> HIGH -> thinking'siz fallback zinciriyle tek tek dene.
 function geminiRequestVariants(requestBody) {
   const variants = [requestBody];
-  if (requestBody.generationConfig && requestBody.generationConfig.thinkingConfig) {
+  const tc = requestBody.generationConfig && requestBody.generationConfig.thinkingConfig;
+  if (tc) {
+    if (String(tc.thinkingLevel || "").toUpperCase() === "XHIGH") {
+      const highCopy = JSON.parse(JSON.stringify(requestBody));
+      highCopy.generationConfig.thinkingConfig.thinkingLevel = "HIGH";
+      variants.push(highCopy);
+    }
     const plain = JSON.parse(JSON.stringify(requestBody));
     delete plain.generationConfig.thinkingConfig;
     variants.push(plain);
@@ -598,33 +674,27 @@ async function handleTranslation(text, sourceLang, targetLang) {
         }
       ]
     },
-    generationConfig: {
+    generationConfig: applyThinkingConfig({
       temperature: 0.3,
-      maxOutputTokens: 2000,
-      thinkingConfig: {
-        thinkingLevel: settings.thinkingLevel
-      }
-    }
+      maxOutputTokens: thinkingMaxTokens(4096, settings.thinkingLevel)
+    }, settings.thinkingLevel)
   };
 
   let lastError = null;
   const bodies = geminiRequestVariants(requestBody);
   for (let i = 0; i < apiKeys.length; i++) {
     const apiKey = apiKeys[i];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${apiKey}`;
 
     let keyFailed = false;
     for (let v = 0; v < bodies.length; v++) {
       try {
         const data = await postGeminiBody(url, bodies[v]);
-        const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const finalText = extractGeminiText(data);
 
-        if (!candidateText) {
+        if (!finalText) {
           throw new Error("Gemini API'den boş yanıt döndü.");
         }
-
-        let finalText = candidateText.trim();
-        finalText = finalText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
         return finalText;
       } catch (error) {
@@ -678,23 +748,22 @@ async function handleSmartReply(thread, stance, targetLang) {
   const requestBody = {
     contents: [{ parts: [{ text: userText }] }],
     systemInstruction: { parts: [{ text: systemPrompt }] },
-    generationConfig: {
+    generationConfig: applyThinkingConfig({
       temperature: 0.7,
-      maxOutputTokens: 2000,
-      thinkingConfig: { thinkingLevel: settings.thinkingLevel }
-    }
+      maxOutputTokens: thinkingMaxTokens(4096, settings.thinkingLevel)
+    }, settings.thinkingLevel)
   };
   let lastError = null;
   const bodies = geminiRequestVariants(requestBody);
   for (let i = 0; i < apiKeys.length; i++) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.modelName}:generateContent?key=${apiKeys[i]}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.modelName)}:generateContent?key=${apiKeys[i]}`;
     let keyFailed = false;
     for (let v = 0; v < bodies.length; v++) {
       try {
         const data = await postGeminiBody(url, bodies[v]);
-        const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!candidateText) throw new Error("Gemini API'den boş yanıt döndü.");
-        return candidateText.trim().replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+        const finalText = extractGeminiText(data);
+        if (!finalText) throw new Error("Gemini API'den boş yanıt döndü.");
+        return finalText;
       } catch (error) {
         if (v < bodies.length - 1 && geminiThinkingRejected(error)) continue;
         lastError = error;
@@ -738,19 +807,22 @@ async function handleVisualTranslation(imageDataUrl, targetLang) {
       { text: `Bu ekran görüntüsündeki TÜM yazıları oku ve ${targetLabel} diline çevir. Sadece çeviri sonucunu döndür, açıklama ekleme. Satır yapısını koru. Okunabilir yazı yoksa sadece şunu yaz: "Yazı bulunamadı."` },
       { inline_data: { mime_type: (mimeMatch && mimeMatch[1]) || "image/png", data: imageDataUrl.slice(comma + 1) } }
     ] }],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 2000, thinkingConfig: { thinkingLevel: settings.thinkingLevel } }
+    generationConfig: applyThinkingConfig({
+      temperature: 0.2,
+      maxOutputTokens: thinkingMaxTokens(4096, settings.thinkingLevel)
+    }, settings.thinkingLevel)
   };
   let lastError = null;
   const bodies = geminiRequestVariants(requestBody);
   for (let i = 0; i < apiKeys.length; i++) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.modelName}:generateContent?key=${apiKeys[i]}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.modelName)}:generateContent?key=${apiKeys[i]}`;
     let keyFailed = false;
     for (let v = 0; v < bodies.length; v++) {
       try {
         const data = await postGeminiBody(url, bodies[v]);
-        const t = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const t = extractGeminiText(data);
         if (!t) throw new Error("Gemini API'den boş yanıt döndü.");
-        return t.trim().replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+        return t;
       } catch (error) {
         if (v < bodies.length - 1 && geminiThinkingRejected(error)) continue;
         lastError = error; keyFailed = true; break;
@@ -847,11 +919,19 @@ async function mixerEnsureOffscreen() {
   let exists = false;
   try { exists = await chrome.offscreen.hasDocument(); } catch (e) { exists = false; }
   if (exists) return;
-  await chrome.offscreen.createDocument({
-    url: "offscreen.html",
-    reasons: ["AUDIO_PLAYBACK"],
-    justification: "Sekme ses seviyesi mikseri"
-  });
+  try {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["AUDIO_PLAYBACK", "WORKERS"],
+      justification: "Sekme ses mikseri ve yerel görsel çeviri (OCR/Inpaint)"
+    });
+  } catch (e) {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["AUDIO_PLAYBACK"],
+      justification: "Sekme ses mikseri ve yerel görsel çeviri"
+    });
+  }
 }
 
 function mixerTellOffscreen(msg) {
@@ -1004,27 +1084,24 @@ async function handleBatchTranslation(texts, targetLang) {
         }
       ]
     },
-    generationConfig: {
+    generationConfig: applyThinkingConfig({
       temperature: 0.1,
       responseMimeType: "application/json",
-      maxOutputTokens: 32768,
-      thinkingConfig: {
-        thinkingLevel: settings.thinkingLevel
-      }
-    }
+      maxOutputTokens: 32768
+    }, settings.thinkingLevel)
   };
 
   let lastError = null;
   const bodies = geminiRequestVariants(requestBody);
   for (let i = 0; i < apiKeys.length; i++) {
     const apiKey = apiKeys[i];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${apiKey}`;
 
     let keyFailed = false;
     for (let v = 0; v < bodies.length; v++) {
       try {
         const data = await postGeminiBody(url, bodies[v]);
-        const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const candidateText = extractGeminiText(data);
 
         if (!candidateText) {
           throw new Error("Gemini API'den boş yanıt döndü.");
@@ -1071,4 +1148,160 @@ async function handleBatchTranslation(texts, targetLang) {
   }
 
   throw lastError || new Error("Tüm API anahtarları başarısız oldu.");
+}
+
+// ==========================================
+// GÖRSEL ÇEVİRİ (ToonParrot OCR + Gemini + Piksel Inpaint Hattı)
+// ==========================================
+function imgTranslateTellOffscreen(msg) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(Object.assign({ scope: "img-translate-offscreen" }, msg), (res) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (res && res.success) resolve(res);
+      else reject(new Error((res && res.error) || "Görsel işleme hatası."));
+    });
+  });
+}
+
+async function handleImageBubblesTranslation(texts, targetLang) {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+  const settings = await new Promise((resolve) => {
+    chrome.storage.local.get(["apiKey", "modelName", "thinkingLevel", "useMultiKeys", "geminiApiKeys"], (result) => {
+      resolve({
+        apiKey: result.apiKey || DEFAULT_API_KEY,
+        modelName: normalizeModelName(result.modelName),
+        thinkingLevel: result.thinkingLevel || "MINIMAL",
+        useMultiKeys: result.useMultiKeys !== undefined ? !!result.useMultiKeys : DEFAULT_USE_MULTI_KEYS,
+        geminiApiKeys: result.geminiApiKeys || DEFAULT_GEMINI_API_KEYS
+      });
+    });
+  });
+
+  const apiKeys = settings.useMultiKeys
+    ? settings.geminiApiKeys.split("\n").map((k) => k.trim()).filter((k) => k !== "")
+    : (settings.apiKey && settings.apiKey.trim() ? [settings.apiKey.trim()] : []);
+
+  if (apiKeys.length === 0) {
+    throw new Error("Lütfen ayarlardan bir Gemini API anahtarı tanımlayın.");
+  }
+
+  const targetLabel = LANG_LABELS[targetLang] || "Türkçe";
+  const prompt = [
+    "You are an expert manga, comic, meme, and image text translator.",
+    `Translate each of the following ${texts.length} text blocks into natural, fluent, idiomatic ${targetLabel} (ISO code: "${targetLang}").`,
+    "STRICT RULES:",
+    "1. Keep personal character names and Asian honorifics (Oppa, Hyung, Sunbae, San, Kun, Chan, Sama, Sensei) in their original spelling, but translate titles, nicknames, UI labels, stats, and dialogue naturally.",
+    "2. Keep translations concise so they fit cleanly inside speech bubbles or original text boxes.",
+    "3. If an entry is purely a meaningless sound effect / onomatopoeia without dialogue or narration (e.g., 'Crack!', 'Whoosh', 'Clang', 'BAM'), return '[SFX]'. Otherwise ALWAYS translate dialogue, captions, memes, headings, and exclamations (e.g. 'NO!', 'HELP ME!').",
+    `4. Return ONLY a JSON object with a "translations" array of exactly ${texts.length} strings in the exact same order.`,
+    "Texts to translate:",
+    JSON.stringify(texts)
+  ].join("\n");
+
+  const requestBody = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: applyThinkingConfig({
+      temperature: 0.2,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          translations: {
+            type: "ARRAY",
+            items: { type: "STRING" }
+          }
+        },
+        required: ["translations"]
+      },
+      maxOutputTokens: thinkingMaxTokens(16384, settings.thinkingLevel)
+    }, settings.thinkingLevel)
+  };
+
+  let lastError = null;
+  const bodies = geminiRequestVariants(requestBody);
+  for (let i = 0; i < apiKeys.length; i++) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.modelName)}:generateContent?key=${apiKeys[i]}`;
+    for (let v = 0; v < bodies.length; v++) {
+      try {
+        const data = await postGeminiBody(url, bodies[v]);
+        const rawText = extractGeminiText(data);
+        if (!rawText) throw new Error("Gemini API'den boş yanıt döndü.");
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+        const parsed = JSON.parse(cleaned);
+        const arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.translations) ? parsed.translations : null);
+        if (!arr || arr.length !== texts.length) {
+          throw new Error(`Çeviri sayısı uyuşmadı (beklenen ${texts.length}, gelen ${arr ? arr.length : 0}).`);
+        }
+        return arr.map((t, idx) => (typeof t === "string" && t.trim() ? t.trim() : texts[idx]));
+      } catch (error) {
+        if (v < bodies.length - 1 && geminiThinkingRejected(error)) continue;
+        lastError = error;
+        break;
+      }
+    }
+  }
+  throw lastError || new Error("Görsel metinleri çevrilemedi.");
+}
+
+async function handleImageTranslatePipeline({ imageSrc, imageDataUrl, targetLang, forceRefresh }) {
+  const cacheKey = `${targetLang}::${imageSrc || gemHash(imageDataUrl)}`;
+  if (!forceRefresh && IMG_TRANS_CACHE.has(cacheKey)) {
+    const cached = IMG_TRANS_CACHE.get(cacheKey);
+    IMG_TRANS_CACHE.delete(cacheKey);
+    IMG_TRANS_CACHE.set(cacheKey, cached);
+    return cached;
+  }
+
+  await mixerEnsureOffscreen();
+
+  // 1. Aşama: Yerel PaddleOCR (ONNX WASM Web Worker) ile balonları bul
+  const ocrRes = await imgTranslateTellOffscreen({
+    action: "img-ocr",
+    imageSrc,
+    imageDataUrl,
+    targetLang
+  });
+
+  if (!ocrRes.jobId || !Array.isArray(ocrRes.texts) || ocrRes.texts.length === 0) {
+    return {
+      success: true,
+      blocks: [],
+      emptyReason: ocrRes.emptyReason || "no-text",
+      width: ocrRes.width || 0,
+      height: ocrRes.height || 0
+    };
+  }
+
+  // 2. Aşama: Metin balonlarını Gemini ile tek seferde çevir
+  let translations;
+  try {
+    translations = await handleImageBubblesTranslation(ocrRes.texts, targetLang);
+  } catch (err) {
+    imgTranslateTellOffscreen({ action: "img-abort", jobId: ocrRes.jobId }).catch(() => {});
+    throw err;
+  }
+
+  // 3. Aşama: Piksel inpaint + stil çıkarımı + akıllı satır dizgisi
+  const inpaintRes = await imgTranslateTellOffscreen({
+    action: "img-inpaint",
+    jobId: ocrRes.jobId,
+    translations,
+    targetLang
+  });
+
+  const finalRes = {
+    success: true,
+    blocks: inpaintRes.blocks || [],
+    width: inpaintRes.width || ocrRes.width || 0,
+    height: inpaintRes.height || ocrRes.height || 0
+  };
+
+  IMG_TRANS_CACHE.set(cacheKey, finalRes);
+  if (IMG_TRANS_CACHE.size > IMG_TRANS_CACHE_MAX) {
+    IMG_TRANS_CACHE.delete(IMG_TRANS_CACHE.keys().next().value);
+  }
+  return finalRes;
 }

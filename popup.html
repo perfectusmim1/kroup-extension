@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gemini Smart Toolkit</title>
-  <link rel="stylesheet" href="popup.css?v=1.4">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap&subset=latin,latin-ext">
+  <link rel="stylesheet" href="popup.css?v=1.5">
 </head>
 <body>
   <div class="app-container">
@@ -16,9 +19,9 @@
             <path d="M12 2L14.85 9.15L22 12L14.85 14.85L12 22L9.15 14.85L2 12L9.15 9.15L12 2Z" fill="url(#logo-grad)" stroke="none"/>
             <defs>
               <linearGradient id="logo-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stop-color="#06b6d4" />
-                <stop offset="50%" stop-color="#3b82f6" />
-                <stop offset="100%" stop-color="#6366f1" />
+                <stop offset="0%" style="stop-color: var(--logo-stop-1, #06b6d4)" />
+                <stop offset="50%" style="stop-color: var(--logo-stop-2, #3b82f6)" />
+                <stop offset="100%" style="stop-color: var(--logo-stop-3, #6366f1)" />
               </linearGradient>
             </defs>
           </svg>
@@ -110,7 +113,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <span class="version-label">v1.4</span>
+        <span class="version-label">v1.5</span>
       </div>
     </aside>
 
@@ -467,16 +470,20 @@
                 <label class="settings-label">Gemini Modeli</label>
                 <div class="custom-select" data-id="yt-gemini-model">
                   <button type="button" class="custom-select-trigger">
-                    <span>gemini-3.8-flash</span>
+                    <span>gemini-4-hydrogen</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
                   </button>
                   <div class="custom-select-options">
-                    <div class="custom-option active" data-value="gemini-3.8-flash">gemini-3.8-flash</div>
+                    <div class="custom-option active" data-value="gemini-4-hydrogen">gemini-4-hydrogen</div>
                     <div class="custom-option" data-value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</div>
+                    <div class="custom-option" data-value="__custom__">Manuel Model Yaz...</div>
                   </div>
-                  <input type="hidden" id="yt-gemini-model" value="gemini-3.8-flash">
+                  <input type="hidden" id="yt-gemini-model" value="gemini-4-hydrogen">
+                </div>
+                <div id="yt-custom-model-group" hidden style="margin-top: 6px;">
+                  <input type="text" id="yt-custom-model" class="text-input textarea-mono" placeholder="örn. gemini-4-argon, gemini-3.8-flash">
                 </div>
               </div>
 
@@ -490,10 +497,12 @@
                     </svg>
                   </button>
                   <div class="custom-select-options">
+                    <div class="custom-option" data-value="NONE">Yok (None)</div>
                     <div class="custom-option" data-value="MINIMAL">Minimal (En Hızlı)</div>
-                    <div class="custom-option" data-value="LOW">Düşük</div>
-                    <div class="custom-option active" data-value="MEDIUM">Orta (Balanced)</div>
-                    <div class="custom-option" data-value="HIGH">Yüksek (En Derin)</div>
+                    <div class="custom-option" data-value="LOW">Düşük (Low)</div>
+                    <div class="custom-option active" data-value="MEDIUM">Orta (Medium)</div>
+                    <div class="custom-option" data-value="HIGH">Yüksek (High)</div>
+                    <div class="custom-option" data-value="XHIGH">Ekstra Yüksek (XHigh)</div>
                   </div>
                   <input type="hidden" id="yt-thinking-level" value="MEDIUM">
                 </div>
@@ -772,34 +781,115 @@
         </section>
 
         <section class="panel" id="panel-authenticator">
-          <div class="settings-form">
-            <div class="settings-section">
-              <div class="settings-section-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          <div class="totp-shell">
+            <div class="totp-topbar">
+              <div class="totp-search-wrap">
+                <svg class="totp-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                 </svg>
-                <span>Doğrulayıcı (TOTP)</span>
-                <span class="badge" id="totp-timer" style="margin-left:auto;">30</span>
+                <input id="totp-search" class="text-input totp-search-input" placeholder="Hesap veya site ara...">
               </div>
 
-              <div class="settings-group">
-                <label class="settings-label" for="totp-label">Yeni Hesap</label>
-                <input id="totp-label" class="text-input" placeholder="Hesap adı (örn. GitHub)" style="margin-bottom:8px;">
-                <div class="totp-add-row">
-                  <input id="totp-secret" class="text-input textarea-mono" placeholder="Gizli anahtar veya otpauth://..." wrap="off">
-                  <button class="btn btn-primary btn-small" id="totp-add-btn">Ekle</button>
+              <div class="totp-ring-box" title="Kod yenilenmesine kalan süre">
+                <svg class="totp-ring-svg" viewBox="0 0 36 36">
+                  <circle class="totp-ring-bg" cx="18" cy="18" r="15.5"></circle>
+                  <circle class="totp-ring-fg" id="totp-ring-fg" cx="18" cy="18" r="15.5"></circle>
+                </svg>
+                <span class="totp-ring-num" id="totp-timer">30</span>
+              </div>
+
+              <button type="button" class="btn btn-primary btn-small totp-add-toggle" id="totp-toggle-add">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>Ekle</span>
+              </button>
+            </div>
+
+            <div class="totp-site-banner" id="totp-site-banner" hidden>
+              <img class="totp-site-fav" id="totp-site-fav" alt="">
+              <span class="totp-site-text" id="totp-site-text"></span>
+            </div>
+
+            <div class="totp-add-card" id="totp-add-card" hidden>
+              <div class="totp-form-grid">
+                <div class="control-item">
+                  <label for="totp-issuer">Servis / Site</label>
+                  <input id="totp-issuer" class="text-input" placeholder="örn. GitHub">
+                </div>
+                <div class="control-item">
+                  <label for="totp-label">Hesap Adı</label>
+                  <input id="totp-label" class="text-input" placeholder="örn. ad@mail.com">
                 </div>
               </div>
-
-              <div class="yt-cache-list" id="totp-list">
-                <div class="yt-cache-empty">Henüz hesap yok.</div>
+              <div class="totp-form-grid" style="margin-top:8px;">
+                <div class="control-item">
+                  <label for="totp-domain">Site Alan Adı (Simge & Akıllı Sıralama)</label>
+                  <div class="totp-inline-field">
+                    <input id="totp-domain" class="text-input" placeholder="örn. github.com">
+                    <button type="button" class="btn btn-secondary btn-small totp-mini-btn" id="totp-use-active-site" title="Açık sitenin alan adını doldur">Aktif Site</button>
+                  </div>
+                </div>
+                <div class="control-item">
+                  <label for="totp-icon">Özel Simge (Opsiyonel)</label>
+                  <input id="totp-icon" class="text-input" placeholder="Emoji veya boş bırak" maxlength="4">
+                </div>
               </div>
+              <div class="totp-add-row" style="margin-top:8px;">
+                <input id="totp-secret" class="text-input textarea-mono" placeholder="Gizli anahtar veya otpauth://..." wrap="off">
+                <button type="button" class="btn btn-primary btn-small" id="totp-add-btn">Kaydet</button>
+              </div>
+            </div>
 
-              <div class="actions-row" style="margin-top:10px;">
-                <button class="btn btn-secondary btn-small" id="totp-import-btn">Dosyadan İçe Aktar</button>
-                <button class="btn btn-secondary btn-small" id="totp-export-btn">Yedek Al</button>
-                <input type="file" id="totp-file-input" accept=".json,.txt,application/json,text/plain" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;" tabindex="-1">
+            <div class="totp-cards-list" id="totp-list">
+              <div class="yt-cache-empty">Henüz hesap yok.</div>
+            </div>
+
+            <div class="totp-footer-bar">
+              <button type="button" class="btn btn-secondary btn-small" id="totp-import-btn">İçe Aktar</button>
+              <button type="button" class="btn btn-secondary btn-small" id="totp-export-btn">Yedek Al</button>
+              <input type="file" id="totp-file-input" accept=".json,.txt,application/json,text/plain" style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;" tabindex="-1">
+            </div>
+
+            <div class="yt-confirm-overlay" id="totp-edit-modal" hidden>
+              <div class="totp-edit-dialog">
+                <div class="totp-edit-head">
+                  <span class="yt-confirm-title" style="margin:0;">Hesabı Düzenle</span>
+                  <button type="button" class="chat-settings-close" id="totp-edit-close" title="Kapat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+                <input type="hidden" id="totp-edit-id">
+                <div class="totp-edit-body">
+                  <div class="control-item">
+                    <label for="totp-edit-issuer">Servis / Yayıncı</label>
+                    <input id="totp-edit-issuer" class="text-input" placeholder="örn. GitHub">
+                  </div>
+                  <div class="control-item">
+                    <label for="totp-edit-label">Hesap Adı</label>
+                    <input id="totp-edit-label" class="text-input" placeholder="örn. cagan@mail.com">
+                  </div>
+                  <div class="control-item">
+                    <label for="totp-edit-domain">Site Alan Adı</label>
+                    <div class="totp-inline-field">
+                      <input id="totp-edit-domain" class="text-input" placeholder="örn. github.com">
+                      <button type="button" class="btn btn-secondary btn-small totp-mini-btn" id="totp-edit-use-site">Aktif Site</button>
+                    </div>
+                  </div>
+                  <div class="control-item">
+                    <label for="totp-edit-icon">Özel Simge / Emoji</label>
+                    <input id="totp-edit-icon" class="text-input" placeholder="Boş bırakılırsa site simgesi kullanılır" maxlength="4">
+                  </div>
+                </div>
+                <div class="yt-confirm-actions" style="margin-top:14px;">
+                  <button type="button" id="totp-edit-cancel" class="btn btn-secondary btn-small">İptal</button>
+                  <button type="button" id="totp-edit-save" class="btn btn-primary btn-small">Kaydet</button>
+                </div>
               </div>
             </div>
           </div>
@@ -846,20 +936,18 @@
         </section>
 
         <section class="panel" id="panel-sound">
-          <div class="settings-form">
-            <div class="settings-section">
-              <div class="settings-section-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                </svg>
-                <span>Ses Mikseri</span>
+          <div class="sound-shell">
+            <div class="sound-toolbar">
+              <div class="sound-filter-tabs" role="tablist">
+                <button type="button" class="sound-filter-btn active" id="sound-filter-active" data-filter="active">Ses Çalanlar</button>
+                <button type="button" class="sound-filter-btn" id="sound-filter-all" data-filter="all">Tüm Sekmeler</button>
               </div>
+              <button type="button" class="btn btn-secondary btn-small" id="sound-reset-all" hidden>Sıfırla</button>
+            </div>
 
-              <div class="yt-error-msg" id="sound-error" hidden></div>
-              <div class="yt-cache-list" id="sound-list">
-                <div class="yt-cache-empty">Yükleniyor...</div>
-              </div>
+            <div class="yt-error-msg" id="sound-error" hidden></div>
+            <div class="sound-cards-list" id="sound-list">
+              <div class="yt-cache-empty">Yükleniyor...</div>
             </div>
           </div>
         </section>
@@ -880,18 +968,19 @@
                 <label class="settings-label">Tema</label>
                 <div class="custom-select" data-id="settings-theme">
                   <button type="button" class="custom-select-trigger">
-                    <span>Açık</span>
+                    <span>Açık (Klasik)</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
                   </button>
                   <div class="custom-select-options">
-                    <div class="custom-option active" data-value="light">Açık</div>
-                    <div class="custom-option" data-value="dark">Koyu</div>
+                    <div class="custom-option active" data-value="light">Açık (Klasik)</div>
+                    <div class="custom-option" data-value="dark">Koyu (Klasik)</div>
+                    <div class="custom-option" data-value="fresh">Ferah (Canlı)</div>
                   </div>
                   <input type="hidden" id="settings-theme" value="light">
                 </div>
-                <p class="input-helper">Eklentinin görünümü.</p>
+                <p class="input-helper">Eklentinin görünümü ve yazı tipi stili.</p>
               </div>
 
               <div class="settings-group">
@@ -948,18 +1037,22 @@
                 <label class="settings-label">Model İsmi</label>
                 <div class="custom-select" data-id="settings-model-name">
                   <button type="button" class="custom-select-trigger">
-                    <span>gemini-3.8-flash</span>
+                    <span>gemini-4-hydrogen</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
                   </button>
                   <div class="custom-select-options">
-                    <div class="custom-option active" data-value="gemini-3.8-flash">gemini-3.8-flash</div>
+                    <div class="custom-option active" data-value="gemini-4-hydrogen">gemini-4-hydrogen</div>
                     <div class="custom-option" data-value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</div>
+                    <div class="custom-option" data-value="__custom__">Manuel Model Yaz...</div>
                   </div>
-                  <input type="hidden" id="settings-model-name" value="gemini-3.8-flash">
+                  <input type="hidden" id="settings-model-name" value="gemini-4-hydrogen">
                 </div>
-                <p class="input-helper">Google Gemini modeli. Varsayılan olarak <code>gemini-3.8-flash</code> kullanılır.</p>
+                <div id="settings-custom-model-group" hidden style="margin-top: 6px;">
+                  <input type="text" id="settings-custom-model" class="text-input textarea-mono" placeholder="örn. gemini-4-argon, gemini-3.8-flash">
+                </div>
+                <p class="input-helper">Google Gemini modeli. Varsayılan olarak <code>gemini-4-hydrogen</code> kullanılır; istersen manuel model adı yazabilirsin.</p>
               </div>
 
               <div class="settings-group" style="margin-top: 14px;">
@@ -977,11 +1070,57 @@
                     <div class="custom-option" data-value="LOW">Düşük (Low)</div>
                     <div class="custom-option" data-value="MEDIUM">Orta (Medium)</div>
                     <div class="custom-option" data-value="HIGH">Yüksek (High)</div>
+                    <div class="custom-option" data-value="XHIGH">Ekstra Yüksek (XHigh)</div>
                   </div>
                   <input type="hidden" id="settings-thinking-level" value="MINIMAL">
                 </div>
-                <p class="input-helper">Yapay zeka modelinin düşünme/akıl yürütme seviyesi. Varsayılan olarak <code>Minimal</code> kullanılır.</p>
+                <p class="input-helper">Yapay zeka modelinin düşünme/akıl yürütme seviyesi (<code>gemini-4-hydrogen</code> ile <code>XHigh</code> desteklenir).</p>
               </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span>Görsel Çeviri (Resim / Manga)</span>
+              </div>
+
+              <div class="settings-select-grid" style="padding: 0;">
+                <div class="control-item">
+                  <label>Görsel Üstü Buton</label>
+                  <div class="custom-select" data-id="settings-img-btn-pos">
+                    <button type="button" class="custom-select-trigger">
+                      <span>Sağ Üstte Göster</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options">
+                      <div class="custom-option active" data-value="right">Sağ Üstte Göster</div>
+                      <div class="custom-option" data-value="left">Sol Üstte Göster</div>
+                      <div class="custom-option" data-value="hidden">Gösterme (Sadece Sağ Tık)</div>
+                    </div>
+                    <input type="hidden" id="settings-img-btn-pos" value="right">
+                  </div>
+                </div>
+                <div class="control-item">
+                  <label>Hedef Dil</label>
+                  <div class="custom-select" data-id="settings-img-target-lang">
+                    <button type="button" class="custom-select-trigger">
+                      <span>Türkçe</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="custom-select-options"></div>
+                    <input type="hidden" id="settings-img-target-lang" value="tr">
+                  </div>
+                </div>
+              </div>
+              <p class="input-helper" style="margin-top: 8px;">Herhangi bir görsele sağ tıklayıp <b>Gemini ile Görseli Çevir</b> diyerek metinleri görselin üzerine yerinde çevirebilirsin.</p>
             </div>
 
             <div class="settings-section">
@@ -1267,7 +1406,7 @@
     </main>
   </div>
 
-  <script src="shazam-sig.js?v=1.4"></script>
-  <script src="popup.js?v=1.4"></script>
+  <script src="shazam-sig.js?v=1.5"></script>
+  <script src="popup.js?v=1.5"></script>
 </body>
 </html>

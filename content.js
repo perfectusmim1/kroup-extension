@@ -85,11 +85,13 @@
   let geminiHideNotebooksEnabled = true;
   let geminiHideUpgradeEnabled = true;
   let savedTranslatorTargetLang = "tr";
+  let imageTranslateBtnPos = "right"; // "right" | "left" | "hidden"
+  let imageTranslateTargetLang = "tr";
   const isX = window.location.hostname.includes("x.com") || window.location.hostname.includes("twitter.com");
   const isGemini = window.location.hostname.includes("gemini.google.com");
 
   // Load settings from local storage
-  chrome.storage.local.get(["selectionTranslationEnabled", "selectionSearchEnabled", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "translatorTargetLang", "popupTheme"], (result) => {
+  chrome.storage.local.get(["selectionTranslationEnabled", "selectionSearchEnabled", "searchMode", "selectionTranslateMode", "inlineTargetLang", "xTranslationEnabled", "xAutoTranslateEnabled", "xCacheEnabled", "xTargetLang", "piDisablerEnabled", "geminiSpeedupEnabled", "geminiHideNotebooksEnabled", "geminiHideUpgradeEnabled", "translatorTargetLang", "popupTheme", "imageTranslateBtnPos", "imageTranslateTargetLang"], (result) => {
     selectionTranslationEnabled = result.selectionTranslationEnabled !== false;
     selectionSearchEnabled = result.selectionSearchEnabled !== false;
     searchMode = result.searchMode || "tab";
@@ -104,10 +106,16 @@
     geminiHideNotebooksEnabled = result.geminiHideNotebooksEnabled !== false;
     geminiHideUpgradeEnabled = result.geminiHideUpgradeEnabled !== false;
     savedTranslatorTargetLang = result.translatorTargetLang || "tr";
-    xUiTheme = result.popupTheme === "dark" ? "dark" : (result.popupTheme === "light" ? "light" : (detectXDark() ? "dark" : "light"));
+    imageTranslateBtnPos = (result.imageTranslateBtnPos === "left" || result.imageTranslateBtnPos === "hidden") ? result.imageTranslateBtnPos : "right";
+    imageTranslateTargetLang = result.imageTranslateTargetLang || "tr";
+    const resolvedTheme = result.popupTheme === "dark" ? "dark" : (result.popupTheme === "fresh" ? "fresh" : "light");
+    xUiTheme = resolvedTheme === "dark" ? "dark" : (result.popupTheme === "light" || result.popupTheme === "fresh" ? "light" : (detectXDark() ? "dark" : "light"));
 
     if (root) {
-      root.setAttribute("data-theme", result.popupTheme === "dark" ? "dark" : "light");
+      root.setAttribute("data-theme", resolvedTheme);
+    }
+    if (typeof syncImageTranslateTheme === "function") {
+      syncImageTranslateTheme(resolvedTheme);
     }
 
     if (targetSelect) {
@@ -160,8 +168,18 @@
     }
     if (changes.popupTheme) {
       const t = changes.popupTheme.newValue;
-      xUiTheme = t === "dark" ? "dark" : "light";
-      if (root) root.setAttribute("data-theme", xUiTheme);
+      const resolvedTheme = t === "dark" ? "dark" : (t === "fresh" ? "fresh" : "light");
+      xUiTheme = resolvedTheme === "dark" ? "dark" : "light";
+      if (root) root.setAttribute("data-theme", resolvedTheme);
+      if (typeof syncImageTranslateTheme === "function") syncImageTranslateTheme(resolvedTheme);
+    }
+    if (changes.imageTranslateBtnPos) {
+      const p = changes.imageTranslateBtnPos.newValue;
+      imageTranslateBtnPos = (p === "left" || p === "hidden") ? p : "right";
+      if (typeof refreshImageTranslatePositions === "function") refreshImageTranslatePositions();
+    }
+    if (changes.imageTranslateTargetLang) {
+      imageTranslateTargetLang = changes.imageTranslateTargetLang.newValue || "tr";
     }
     if (changes.searchMode) {
       searchMode = changes.searchMode.newValue || "tab";
@@ -326,6 +344,32 @@
 
       --shadow-lg: 0 28px 56px -16px rgba(0, 0, 0, 0.75), 0 2px 12px rgba(0, 0, 0, 0.5);
       --shadow-sm: 0 10px 28px -8px rgba(0, 0, 0, 0.65), 0 1px 5px rgba(0, 0, 0, 0.45);
+    }
+
+    :host([data-theme="fresh"]) {
+      --bg-primary: #f6fbfa;
+      --bg-secondary: #edf7f5;
+      --bg-tertiary: #dff0ec;
+      --bg-hover: rgba(13, 148, 136, 0.08);
+      --bg-active: rgba(13, 148, 136, 0.14);
+      --card-bg: rgba(255, 255, 255, 0.97);
+
+      --text-primary: #0f2422;
+      --text-secondary: #3f5c59;
+      --text-tertiary: #6e8b88;
+
+      --border-color: #d4e8e4;
+      --border-strong: #b4d8d1;
+      --focus-ring: rgba(13, 148, 136, 0.16);
+
+      --accent-cyan: #0d9488;
+      --gradient-accent: linear-gradient(135deg, #10b981 0%, #06b6d4 55%, #0284c7 100%);
+
+      --shimmer-a: #e3f2ef;
+      --shimmer-b: #f3faf8;
+      --scrollbar-thumb: #b4d8d1;
+      --shadow-lg: 0 24px 48px -16px rgba(13, 148, 136, 0.2), 0 2px 10px rgba(15, 36, 34, 0.06);
+      --shadow-sm: 0 10px 24px -8px rgba(13, 148, 136, 0.18), 0 1px 4px rgba(15, 36, 34, 0.06);
     }
 
     /* Floating action bar container */
@@ -2052,6 +2096,8 @@
       translateWholePage(message.targetLang);
     } else if (message.action === "visual-translate-start") {
       startVisualTranslate();
+    } else if (message.action === "image-translate-context") {
+      handleImageContextTranslate(message.srcUrl, message.targetLang);
     } else if (message.action === "translate-page-restore") {
       restoreWholePageOriginals();
     } else if (message.action === "query-page-translation-status") {
@@ -4285,5 +4331,702 @@
       overlay.addEventListener("mousedown", () => cleanup(), { once: true });
     }, { once: false });
   }
+
+  // ==========================================
+  // TOONPARROT GÖRSEL ÇEVİRİ (Yerinde OCR + Inpaint + Vektör Dizgi)
+  // Sağ tık menüsü + görsel üstü yüzen buton (sağ / sol / gizli)
+  // ==========================================
+  let imgHost = null;
+  let imgShadow = null;
+  let imgHoverBtn = null;
+  let imgOverlaysLayer = null;
+  let imgControlsLayer = null;
+  let hoveredImg = null;
+  let lastContextImg = null;
+  let imgTheme = "light";
+  let imgFontsLoaded = false;
+  let imgSyncRaf = 0;
+  let imgHoverHideTimer = null;
+  const imgStates = new Map(); // HTMLImageElement -> { status, blocks, shown, overlayEl, ctrlEl, toastEl, toastTimer, targetLang, error }
+
+  const IMG_TRANSLATE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>';
+  const IMG_EYE_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const IMG_EYEOFF_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
+  const IMG_REFRESH_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
+  const IMG_CLOSE_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+  function ensureScanlationPageFonts() {
+    if (imgFontsLoaded || document.getElementById("gemini-scanlation-fonts")) {
+      imgFontsLoaded = true;
+      return;
+    }
+    imgFontsLoaded = true;
+    try {
+      const link = document.createElement("link");
+      link.id = "gemini-scanlation-fonts";
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=Anton&family=Bangers&family=Cinzel:wght@700;800&family=Pangolin&family=Patrick+Hand&family=Permanent+Marker&family=Shantell+Sans:ital,wght@0,500;0,600;0,700;1,500;1,600;1,700&display=swap&subset=latin,latin-ext";
+      (document.head || document.documentElement).appendChild(link);
+    } catch (e) { void e; }
+  }
+
+  function ensureImgTranslateHost() {
+    if (imgHost && imgHost.isConnected) return;
+    imgHost = document.createElement("div");
+    imgHost.id = "gemini-img-trans-host";
+    imgHost.setAttribute("data-theme", imgTheme);
+    imgHost.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483640;overflow:hidden;";
+    imgShadow = imgHost.attachShadow({ mode: "open" });
+
+    const style = document.createElement("style");
+    style.textContent = `
+      :host {
+        --pill-bg: rgba(18, 22, 26, 0.84);
+        --pill-border: rgba(255, 255, 255, 0.16);
+        --pill-text: #f8fafc;
+        --pill-accent: #14b8a6;
+        --pill-hover: rgba(18, 22, 26, 0.96);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      :host([data-theme="fresh"]) {
+        --pill-bg: rgba(15, 36, 34, 0.86);
+        --pill-border: rgba(20, 184, 166, 0.42);
+        --pill-accent: #2dd4bf;
+        --pill-hover: rgba(13, 148, 136, 0.96);
+      }
+      * { box-sizing: border-box; }
+      .img-overlay-wrap {
+        position: fixed;
+        pointer-events: none;
+        user-select: none;
+        overflow: hidden;
+        container-type: inline-size;
+      }
+      .img-patch {
+        position: absolute;
+        display: block;
+        max-width: none;
+        pointer-events: none;
+        user-select: none;
+      }
+      .img-text-block {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        pointer-events: none;
+        user-select: none;
+      }
+      .img-text-block.single-stat {
+        align-items: flex-start;
+      }
+      .img-text-line {
+        display: block;
+        width: 100%;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .img-text-block.single-stat .img-text-line {
+        text-align: left;
+      }
+      .img-hover-btn {
+        position: fixed;
+        display: none;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 11px;
+        border-radius: 999px;
+        border: 1px solid var(--pill-border);
+        background: var(--pill-bg);
+        color: var(--pill-text);
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: 0.1px;
+        cursor: pointer;
+        pointer-events: auto;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+        transition: background 150ms ease, border-color 150ms ease, transform 150ms ease, opacity 140ms ease;
+        z-index: 3;
+      }
+      .img-hover-btn:hover {
+        background: var(--pill-hover);
+        border-color: var(--pill-accent);
+        transform: translateY(-1px);
+      }
+      .img-hover-btn:active { transform: scale(0.95); }
+      .img-hover-btn svg { color: var(--pill-accent); flex-shrink: 0; }
+      .img-ctrl-bar {
+        position: fixed;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 30px;
+        padding: 0 6px;
+        border-radius: 999px;
+        border: 1px solid var(--pill-border);
+        background: var(--pill-bg);
+        color: var(--pill-text);
+        font-size: 11.5px;
+        font-weight: 600;
+        pointer-events: auto;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        z-index: 4;
+      }
+      .img-ctrl-bar.is-error {
+        border-color: rgba(248, 113, 113, 0.55);
+        color: #fecaca;
+      }
+      .img-ctrl-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-width: 24px;
+        height: 24px;
+        padding: 0 5px;
+        border: none;
+        border-radius: 999px;
+        background: transparent;
+        color: inherit;
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 130ms ease, color 130ms ease;
+      }
+      .img-ctrl-btn:hover { background: rgba(255, 255, 255, 0.14); }
+      .img-ctrl-btn.active { color: var(--pill-accent); }
+      .img-spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid rgba(255, 255, 255, 0.25);
+        border-top-color: var(--pill-accent);
+        border-radius: 50%;
+        animation: imgSpin 650ms linear infinite;
+        flex-shrink: 0;
+      }
+      .img-status-text {
+        padding: 0 5px;
+        white-space: nowrap;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      @keyframes imgSpin { to { transform: rotate(360deg); } }
+    `;
+    imgShadow.appendChild(style);
+
+    imgOverlaysLayer = document.createElement("div");
+    imgControlsLayer = document.createElement("div");
+    imgHoverBtn = document.createElement("button");
+    imgHoverBtn.type = "button";
+    imgHoverBtn.className = "img-hover-btn";
+    imgHoverBtn.innerHTML = `${IMG_TRANSLATE_ICON}<span>Görseli Çevir</span>`;
+    imgHoverBtn.addEventListener("mouseenter", () => {
+      if (imgHoverHideTimer) { clearTimeout(imgHoverHideTimer); imgHoverHideTimer = null; }
+    });
+    imgHoverBtn.addEventListener("mouseleave", () => {
+      scheduleHideHoverBtn();
+    });
+    imgHoverBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const target = hoveredImg;
+      hideHoverBtn();
+      if (target && target.isConnected) {
+        translateImageElement(target, imageTranslateTargetLang, false);
+      }
+    });
+
+    imgShadow.appendChild(imgOverlaysLayer);
+    imgShadow.appendChild(imgControlsLayer);
+    imgShadow.appendChild(imgHoverBtn);
+    (document.documentElement || document.body).appendChild(imgHost);
+  }
+
+  function syncImageTranslateTheme(theme) {
+    imgTheme = theme || "light";
+    if (imgHost) imgHost.setAttribute("data-theme", imgTheme);
+  }
+
+  // object-fit: contain kullanan lightbox/galeri görsellerinde gerçek resim alanını hesapla
+  function getRenderedImageBox(img) {
+    const r = img.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const nw = img.naturalWidth || r.width;
+    const nh = img.naturalHeight || r.height;
+    let left = r.left, top = r.top, width = r.width, height = r.height;
+    try {
+      const fit = window.getComputedStyle(img).objectFit;
+      if (fit === "contain" && nw > 0 && nh > 0) {
+        const imgRatio = nw / nh;
+        const boxRatio = r.width / r.height;
+        if (imgRatio > boxRatio) {
+          height = r.width / imgRatio;
+          top = r.top + (r.height - height) * 0.5;
+        } else {
+          width = r.height * imgRatio;
+          left = r.left + (r.width - width) * 0.5;
+        }
+      }
+    } catch (e) { void e; }
+    return { left, top, width, height, right: left + width, bottom: top + height };
+  }
+
+  function isEligibleImage(img) {
+    if (!img || img.tagName !== "IMG" || !img.isConnected) return false;
+    if (img.closest("#gemini-translator-root, #gemini-img-trans-host")) return false;
+    const src = img.currentSrc || img.src || "";
+    if (!src || src.startsWith("data:image/svg")) return false;
+    const r = img.getBoundingClientRect();
+    if (r.width < 140 || r.height < 140) return false;
+    if (img.complete && (img.naturalWidth < 110 || img.naturalHeight < 110)) return false;
+    return true;
+  }
+
+  function findImageAtPoint(clientX, clientY, target) {
+    if (target && target.tagName === "IMG") return target;
+    try {
+      const els = document.elementsFromPoint(clientX, clientY);
+      for (const el of els) {
+        if (el.tagName === "IMG") return el;
+      }
+    } catch (e) { void e; }
+    return null;
+  }
+
+  function placeCornerPill(el, box, posMode) {
+    const pad = 10;
+    const pillW = el.offsetWidth || 110;
+    const top = Math.max(8, Math.min(window.innerHeight - 38, box.top + pad));
+    let left;
+    if (posMode === "left") {
+      left = Math.max(8, Math.min(window.innerWidth - pillW - 8, box.left + pad));
+    } else {
+      left = Math.max(8, Math.min(window.innerWidth - pillW - 8, box.right - pillW - pad));
+    }
+    el.style.top = `${Math.round(top)}px`;
+    el.style.left = `${Math.round(left)}px`;
+  }
+
+  function hideHoverBtn() {
+    if (imgHoverHideTimer) { clearTimeout(imgHoverHideTimer); imgHoverHideTimer = null; }
+    hoveredImg = null;
+    if (imgHoverBtn) imgHoverBtn.style.display = "none";
+  }
+
+  function scheduleHideHoverBtn() {
+    if (imgHoverHideTimer) clearTimeout(imgHoverHideTimer);
+    imgHoverHideTimer = setTimeout(() => {
+      hideHoverBtn();
+    }, 180);
+  }
+
+  function syncAllImageOverlays() {
+    imgSyncRaf = 0;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    if (hoveredImg && imgHoverBtn && imgHoverBtn.style.display !== "none") {
+      if (imageTranslateBtnPos === "hidden" || !hoveredImg.isConnected || imgStates.has(hoveredImg)) {
+        hideHoverBtn();
+      } else {
+        const box = getRenderedImageBox(hoveredImg);
+        if (!box || box.bottom < 0 || box.top > vh || box.right < 0 || box.left > vw) {
+          hideHoverBtn();
+        } else {
+          placeCornerPill(imgHoverBtn, box, imageTranslateBtnPos);
+        }
+      }
+    }
+
+    for (const [img, st] of imgStates.entries()) {
+      if (!img.isConnected) {
+        removeImageState(img);
+        continue;
+      }
+      const box = getRenderedImageBox(img);
+      const visible = box && box.width > 16 && box.height > 16 &&
+        box.bottom > 0 && box.top < vh && box.right > 0 && box.left < vw;
+
+      if (st.overlayEl) {
+        if (!visible || !st.shown) {
+          st.overlayEl.style.display = "none";
+        } else {
+          st.overlayEl.style.display = "block";
+          st.overlayEl.style.left = `${box.left}px`;
+          st.overlayEl.style.top = `${box.top}px`;
+          st.overlayEl.style.width = `${box.width}px`;
+          st.overlayEl.style.height = `${box.height}px`;
+        }
+      }
+      if (st.ctrlEl) {
+        if (!visible) {
+          st.ctrlEl.style.display = "none";
+        } else {
+          st.ctrlEl.style.display = "inline-flex";
+          const corner = imageTranslateBtnPos === "left" ? "left" : "right";
+          placeCornerPill(st.ctrlEl, box, corner);
+        }
+      }
+    }
+  }
+
+  function scheduleImgSync() {
+    if (imgSyncRaf) return;
+    imgSyncRaf = requestAnimationFrame(syncAllImageOverlays);
+  }
+
+  function refreshImageTranslatePositions() {
+    if (imageTranslateBtnPos === "hidden") hideHoverBtn();
+    scheduleImgSync();
+  }
+
+  function removeImageState(img) {
+    const st = imgStates.get(img);
+    if (!st) return;
+    if (st.toastTimer) clearTimeout(st.toastTimer);
+    if (st.overlayEl) st.overlayEl.remove();
+    if (st.ctrlEl) st.ctrlEl.remove();
+    imgStates.delete(img);
+  }
+
+  function renderBlocksIntoOverlay(overlayEl, blocks) {
+    overlayEl.innerHTML = "";
+    // 1. Katman: Piksel-inpaint yamaları
+    for (const block of blocks) {
+      if (!block.patchDataUrl || !block.patchBox) continue;
+      const [pYmin, pXmin, pYmax, pXmax] = block.patchBox;
+      const patch = document.createElement("img");
+      patch.className = "img-patch";
+      patch.src = block.patchDataUrl;
+      patch.alt = "";
+      patch.draggable = false;
+      patch.style.top = `${pYmin / 10}%`;
+      patch.style.left = `${pXmin / 10}%`;
+      patch.style.width = `${(pXmax - pXmin) / 10}%`;
+      patch.style.height = `${(pYmax - pYmin) / 10}%`;
+      overlayEl.appendChild(patch);
+    }
+
+    // 2. Katman: Vektör scanlation dizgisi
+    for (const block of blocks) {
+      const displayText = block.displayText || block.text || "";
+      if (!displayText) continue;
+      const [ymin, xmin, ymax, xmax] = block.box;
+      const textColor = block.textColor || (block.isDark ? "#fafafa" : "#0c0c0c");
+      const fontSizeCqw = block.fontSizeCqw ?? 2.85;
+      const fontFamilyCss = block.fontFamilyCss || '"Patrick Hand", "Pangolin", "Shantell Sans", system-ui, sans-serif';
+      const fontWeight = block.fontWeight ?? 600;
+      const lineHeightRatio = block.lineHeightRatio ?? 1.09;
+      const strokeColor = block.strokeColor || "#ffffff";
+      const strokeWidthEm = block.strokeWidthEm ?? 0.12;
+      const letterSpacing = `${block.letterSpacingEm ?? 0.01}em`;
+      const textShadow = block.shadowColor
+        ? `0 0 3px ${block.shadowColor}, 0 0 7px ${block.shadowColor}`
+        : "";
+
+      const boxEl = document.createElement("div");
+      boxEl.className = "img-text-block" + (block.isSingleLineStat ? " single-stat" : "");
+      boxEl.style.top = `${ymin / 10}%`;
+      boxEl.style.left = `${xmin / 10}%`;
+      boxEl.style.width = `${(xmax - xmin) / 10}%`;
+      boxEl.style.height = `${(ymax - ymin) / 10}%`;
+      const tf = [];
+      if (block.rotationDeg) tf.push(`rotate(${block.rotationDeg}deg)`);
+      if (block.skewDeg) tf.push(`skewX(${block.skewDeg}deg)`);
+      if (tf.length) boxEl.style.transform = tf.join(" ");
+
+      const lines = Array.isArray(block.wrappedLines) && block.wrappedLines.length > 0
+        ? block.wrappedLines
+        : [{ text: displayText, scale: 1 }];
+
+      lines.forEach((line, lineIdx) => {
+        const lineCqw = Number((fontSizeCqw * (line.scale || 1)).toFixed(3));
+        const ls = block.lineStyles && block.lineStyles[lineIdx];
+        const lineColor = (ls && ls.textColor) || textColor;
+        const lineHasStroke = ls && ls.hasTextStroke !== undefined ? ls.hasTextStroke : block.hasTextStroke;
+        const lineStrokeColor = (ls && ls.strokeColor) || strokeColor;
+        const lineStrokeWidthEm = (ls && ls.strokeWidthEm) || strokeWidthEm;
+        const lineShadow = (ls && ls.shadowColor)
+          ? `0 0 3px ${ls.shadowColor}, 0 0 7px ${ls.shadowColor}`
+          : (ls && ls.hasTextStroke === false ? "" : textShadow);
+
+        const span = document.createElement("span");
+        span.className = "img-text-line";
+        span.textContent = line.text;
+        span.style.color = lineColor;
+        span.style.fontFamily = fontFamilyCss;
+        span.style.fontWeight = String(fontWeight);
+        span.style.fontStyle = block.fontStyle || "normal";
+        span.style.fontSize = `${lineCqw}cqw`;
+        span.style.lineHeight = String(lineHeightRatio);
+        span.style.letterSpacing = letterSpacing;
+        if (lineShadow) span.style.textShadow = lineShadow;
+        if (lineHasStroke) {
+          span.style.webkitTextStroke = `${lineStrokeWidthEm}em ${lineStrokeColor}`;
+          span.style.paintOrder = "stroke fill";
+        }
+        if ((!ls || !ls.textColor) && Array.isArray(block.gradientStops) && block.gradientStops.length === 2) {
+          span.style.backgroundImage = `linear-gradient(180deg, ${block.gradientStops[0]}, ${block.gradientStops[1]})`;
+          span.style.webkitBackgroundClip = "text";
+          span.style.webkitTextFillColor = "transparent";
+        }
+        boxEl.appendChild(span);
+      });
+
+      overlayEl.appendChild(boxEl);
+    }
+  }
+
+  function renderImgCtrlBar(img) {
+    const st = imgStates.get(img);
+    if (!st || !st.ctrlEl) return;
+    const bar = st.ctrlEl;
+    bar.innerHTML = "";
+    bar.classList.toggle("is-error", st.status === "error");
+
+    if (st.status === "loading") {
+      bar.innerHTML = '<span class="img-spinner"></span><span class="img-status-text">Görsel çevriliyor...</span>';
+      return;
+    }
+
+    if (st.status === "empty") {
+      const msg = document.createElement("span");
+      msg.className = "img-status-text";
+      msg.textContent = st.emptyMessage || "Çevrilecek metin bulunamadı";
+      bar.appendChild(msg);
+      const cls = document.createElement("button");
+      cls.type = "button";
+      cls.className = "img-ctrl-btn";
+      cls.title = "Kapat";
+      cls.innerHTML = IMG_CLOSE_ICON;
+      cls.addEventListener("click", (e) => { e.stopPropagation(); removeImageState(img); });
+      bar.appendChild(cls);
+      return;
+    }
+
+    if (st.status === "error") {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "img-ctrl-btn";
+      retry.title = st.error || "Tekrar dene";
+      retry.innerHTML = `${IMG_REFRESH_ICON}<span>Tekrar Dene</span>`;
+      retry.addEventListener("click", (e) => {
+        e.stopPropagation();
+        translateImageElement(img, st.targetLang || imageTranslateTargetLang, true);
+      });
+      bar.appendChild(retry);
+
+      const cls = document.createElement("button");
+      cls.type = "button";
+      cls.className = "img-ctrl-btn";
+      cls.title = "Kapat";
+      cls.innerHTML = IMG_CLOSE_ICON;
+      cls.addEventListener("click", (e) => { e.stopPropagation(); removeImageState(img); });
+      bar.appendChild(cls);
+      return;
+    }
+
+    // Done state
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "img-ctrl-btn" + (st.shown ? " active" : "");
+    toggleBtn.title = st.shown ? "Çeviriyi gizle (Orijinali gör)" : "Çeviriyi göster";
+    toggleBtn.innerHTML = st.shown ? IMG_EYEOFF_ICON : IMG_EYE_ICON;
+    toggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      st.shown = !st.shown;
+      renderImgCtrlBar(img);
+      scheduleImgSync();
+    });
+    bar.appendChild(toggleBtn);
+
+    const reBtn = document.createElement("button");
+    reBtn.type = "button";
+    reBtn.className = "img-ctrl-btn";
+    reBtn.title = "Yeniden çevir";
+    reBtn.innerHTML = IMG_REFRESH_ICON;
+    reBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      translateImageElement(img, st.targetLang || imageTranslateTargetLang, true);
+    });
+    bar.appendChild(reBtn);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "img-ctrl-btn";
+    closeBtn.title = "Çeviriyi kaldır";
+    closeBtn.innerHTML = IMG_CLOSE_ICON;
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeImageState(img);
+    });
+    bar.appendChild(closeBtn);
+  }
+
+  async function readLocalBlobAsDataUrl(url) {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Görsel okunamadı."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function translateImageElement(img, targetLang, forceRefresh) {
+    if (!img || !img.isConnected) return;
+    ensureScanlationPageFonts();
+    ensureImgTranslateHost();
+    hideHoverBtn();
+
+    const prev = imgStates.get(img);
+    if (prev && prev.status === "loading") return;
+    if (prev) removeImageState(img);
+
+    const overlayEl = document.createElement("div");
+    overlayEl.className = "img-overlay-wrap";
+    overlayEl.style.display = "none";
+    imgOverlaysLayer.appendChild(overlayEl);
+
+    const ctrlEl = document.createElement("div");
+    ctrlEl.className = "img-ctrl-bar";
+    imgControlsLayer.appendChild(ctrlEl);
+
+    const st = {
+      status: "loading",
+      blocks: [],
+      shown: true,
+      overlayEl,
+      ctrlEl,
+      toastTimer: null,
+      targetLang: targetLang || imageTranslateTargetLang || "tr",
+      error: ""
+    };
+    imgStates.set(img, st);
+    renderImgCtrlBar(img);
+    scheduleImgSync();
+
+    const rawSrc = img.currentSrc || img.src || "";
+    let imageDataUrl = "";
+    let imageSrc = rawSrc;
+
+    try {
+      if (rawSrc.startsWith("data:")) {
+        imageDataUrl = rawSrc;
+        imageSrc = "";
+      } else if (rawSrc.startsWith("blob:")) {
+        imageDataUrl = await readLocalBlobAsDataUrl(rawSrc);
+        imageSrc = "";
+      }
+    } catch (e) {
+      st.status = "error";
+      st.error = "Görsel okunamadı: " + e.message;
+      renderImgCtrlBar(img);
+      scheduleImgSync();
+      return;
+    }
+
+    safeSendMessage({
+      action: "image-translate-run",
+      imageSrc,
+      imageDataUrl,
+      targetLang: st.targetLang,
+      forceRefresh: !!forceRefresh
+    }, (res) => {
+      if (!imgStates.has(img)) return;
+      if (!res || !res.success) {
+        st.status = "error";
+        st.error = (res && res.error) || "Görsel çevrilemedi.";
+        renderImgCtrlBar(img);
+        scheduleImgSync();
+        return;
+      }
+
+      const blocks = Array.isArray(res.blocks) ? res.blocks : [];
+      if (blocks.length === 0) {
+        st.status = "empty";
+        st.emptyMessage = res.emptyReason === "already-target"
+          ? "Görsel zaten hedef dilde"
+          : "Görselde çevrilecek metin yok";
+        renderImgCtrlBar(img);
+        scheduleImgSync();
+        st.toastTimer = setTimeout(() => removeImageState(img), 3200);
+        return;
+      }
+
+      st.status = "done";
+      st.blocks = blocks;
+      st.shown = true;
+      renderBlocksIntoOverlay(overlayEl, blocks);
+      renderImgCtrlBar(img);
+      scheduleImgSync();
+    });
+  }
+
+  function handleImageContextTranslate(srcUrl, targetLang) {
+    let target = (lastContextImg && lastContextImg.isConnected) ? lastContextImg : null;
+    if (!target && srcUrl) {
+      const imgs = document.querySelectorAll("img");
+      for (const im of imgs) {
+        if (im.currentSrc === srcUrl || im.src === srcUrl) {
+          target = im;
+          break;
+        }
+      }
+    }
+    if (!target) return;
+    translateImageElement(target, targetLang || imageTranslateTargetLang || "tr", false);
+  }
+
+  // Sağ tık yapılan görseli hatırla
+  document.addEventListener("contextmenu", (e) => {
+    const found = findImageAtPoint(e.clientX, e.clientY, e.target);
+    lastContextImg = found || null;
+  }, true);
+
+  // Görsel üstü yüzen buton (hover)
+  let hoverCheckRaf = 0;
+  let lastMouseEvt = null;
+  document.addEventListener("mousemove", (e) => {
+    if (imageTranslateBtnPos === "hidden") return;
+    lastMouseEvt = e;
+    if (hoverCheckRaf) return;
+    hoverCheckRaf = requestAnimationFrame(() => {
+      hoverCheckRaf = 0;
+      const ev = lastMouseEvt;
+      if (!ev || imageTranslateBtnPos === "hidden") return;
+      if (imgHost && (ev.target === imgHost || imgHost.contains(ev.target))) return;
+      const img = findImageAtPoint(ev.clientX, ev.clientY, ev.target);
+      if (img && isEligibleImage(img) && !imgStates.has(img)) {
+        if (imgHoverHideTimer) { clearTimeout(imgHoverHideTimer); imgHoverHideTimer = null; }
+        ensureImgTranslateHost();
+        hoveredImg = img;
+        const box = getRenderedImageBox(img);
+        if (box) {
+          imgHoverBtn.style.display = "inline-flex";
+          placeCornerPill(imgHoverBtn, box, imageTranslateBtnPos);
+        }
+      } else if (hoveredImg) {
+        scheduleHideHoverBtn();
+      }
+    });
+  }, { passive: true });
+
+  window.addEventListener("scroll", () => {
+    if (imgStates.size > 0 || hoveredImg) scheduleImgSync();
+  }, { passive: true, capture: true });
+
+  window.addEventListener("resize", () => {
+    if (imgStates.size > 0 || hoveredImg) scheduleImgSync();
+  }, { passive: true });
 
 })();

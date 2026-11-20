@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gemini Smart Toolkit",
-  "version": "1.4",
-  "description": "TDK Uyumlu Cümle Düzeltici, Özetleyici, Akıllı Yanıt ve Dil Çevirmeni.",
+  "version": "1.5",
+  "description": "TDK Uyumlu Cümle Düzeltici, Özetleyici, Akıllı Yanıt, Dil ve Görsel Çevirmeni.",
   "permissions": [
     "storage",
     "declarativeNetRequest",
