@@ -1190,13 +1190,14 @@ async function handleImageBubblesTranslation(texts, targetLang) {
 
   const targetLabel = LANG_LABELS[targetLang] || "Türkçe";
   const prompt = [
-    "You are an expert manga, comic, meme, and image text translator.",
+    "You are an expert translator for ALL web images: memes, signs, photos, YouTube thumbnails, UI screenshots, chat bubbles, posters, comics, and manga.",
     `Translate each of the following ${texts.length} text blocks into natural, fluent, idiomatic ${targetLabel} (ISO code: "${targetLang}").`,
     "STRICT RULES:",
-    "1. Keep personal character names and Asian honorifics (Oppa, Hyung, Sunbae, San, Kun, Chan, Sama, Sensei) in their original spelling, but translate titles, nicknames, UI labels, stats, and dialogue naturally.",
-    "2. Keep translations concise so they fit cleanly inside speech bubbles or original text boxes.",
-    "3. If an entry is purely a meaningless sound effect / onomatopoeia without dialogue or narration (e.g., 'Crack!', 'Whoosh', 'Clang', 'BAM'), return '[SFX]'. Otherwise ALWAYS translate dialogue, captions, memes, headings, and exclamations (e.g. 'NO!', 'HELP ME!').",
-    `4. Return ONLY a JSON object with a "translations" array of exactly ${texts.length} strings in the exact same order.`,
+    "1. Keep proper brand/game logos (e.g., 'grand theft auto') and personal names intact, but translate ALL meaningful headings, meme captions, t-shirt/sign text, UI labels, chats, and dialogue naturally.",
+    "2. Keep translations concise so they fit cleanly inside the original text footprint without overflowing.",
+    "3. Match natural capitalization: if an input is mixed/sentence case, return natural sentence case; if ALL CAPS, keep it punchy.",
+    "4. Only return '[SFX]' for pure meaningless comic onomatopoeia (e.g. 'WHOOSH', 'CLANG', 'BOOM'). NEVER return '[SFX]' for signs, meme phrases, buttons, or exclamations (e.g. 'NO FUN', 'STOP', 'PRESS', 'HELP!').",
+    `5. Return ONLY a JSON object with a "translations" array of exactly ${texts.length} strings in the exact same order.`,
     "Texts to translate:",
     JSON.stringify(texts)
   ].join("\n");

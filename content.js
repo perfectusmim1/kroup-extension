@@ -4388,7 +4388,8 @@
       pointer-events: none;
       user-select: none;
     }
-    .img-text-block.single-stat {
+    .img-text-block.single-stat,
+    .img-text-block.align-left {
       align-items: flex-start;
     }
     .img-text-line {
@@ -4397,7 +4398,8 @@
       white-space: nowrap;
       text-align: center;
     }
-    .img-text-block.single-stat .img-text-line {
+    .img-text-block.single-stat .img-text-line,
+    .img-text-block.align-left .img-text-line {
       text-align: left;
     }
     .img-hover-btn,
@@ -4726,7 +4728,10 @@
         : "";
 
       const boxEl = document.createElement("div");
-      boxEl.className = "img-text-block" + (block.isSingleLineStat ? " single-stat" : "");
+      const boxClasses = ["img-text-block"];
+      if (block.isSingleLineStat) boxClasses.push("single-stat");
+      if (block.textAlign === "left") boxClasses.push("align-left");
+      boxEl.className = boxClasses.join(" ");
       boxEl.style.top = (ymin / 10) + "%";
       boxEl.style.left = (xmin / 10) + "%";
       boxEl.style.width = ((xmax - xmin) / 10) + "%";
